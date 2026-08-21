@@ -40,7 +40,7 @@ enum PrototypeMailbox {
     private static let recordKey = "prototype.final-transcript"
 
     static func current() -> PrototypeMailboxRecord? {
-        guard let data = defaults.data(forKey: recordKey) else {
+        guard let data = try? Data(contentsOf: recordURL) else {
             return nil
         }
         return try? JSONDecoder().decode(PrototypeMailboxRecord.self, from: data)
@@ -161,16 +161,25 @@ enum PrototypeMailbox {
     }
 
     static func clear() {
-        defaults.removeObject(forKey: recordKey)
-        defaults.synchronize()
+        try? FileManager.default.removeItem(at: recordURL)
     }
 
-    private static var defaults: UserDefaults {
-        guard let defaults = UserDefaults(suiteName: appGroupID) else {
-            preconditionFailure("Unable to open prototype App Group \(appGroupID)")
+    private static let recordURL: URL = {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupID
+        ) else {
+            preconditionFailure("Unable to open prototype App Group container \(appGroupID)")
         }
-        return defaults
-    }
+        do {
+            try FileManager.default.createDirectory(
+                at: containerURL,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            preconditionFailure("Unable to prepare prototype App Group container: \(error)")
+        }
+        return containerURL.appendingPathComponent("\(recordKey).json")
+    }()
 
     private static func update(id: UUID, mutation: (inout PrototypeMailboxRecord) -> Void) {
         guard var record = current(), record.id == id else {
@@ -183,8 +192,9 @@ enum PrototypeMailbox {
     @discardableResult
     private static func save(_ record: PrototypeMailboxRecord) -> Bool {
         guard let data = try? JSONEncoder().encode(record) else { return false }
-        defaults.set(data, forKey: recordKey)
-        defaults.synchronize()
+        guard (try? data.write(to: recordURL, options: .atomic)) != nil else {
+            return false
+        }
         return current() == record
     }
 }

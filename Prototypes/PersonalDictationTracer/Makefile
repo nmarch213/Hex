@@ -43,6 +43,7 @@ validate: generate typecheck smoke-mailbox smoke-server
 		ios/App/HexKeyboardTracer.entitlements \
 		ios/Keyboard/HexKeyboardExtension.entitlements
 	test "$$('/usr/libexec/PlistBuddy' -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' ios/App/Info.plist)" = hextracer
+	test "$$('/usr/libexec/PlistBuddy' -c 'Print :CFBundleDisplayName' ios/Keyboard/Info.plist)" = 'Hex Prototype'
 	test "$$('/usr/libexec/PlistBuddy' -c 'Print :NSExtension:NSExtensionAttributes:RequestsOpenAccess' ios/Keyboard/Info.plist)" = true
 	test "$$('/usr/libexec/PlistBuddy' -c 'Print :com.apple.security.application-groups:0' ios/App/HexKeyboardTracer.entitlements)" = group.com.nmarch213.HexKeyboardTracer
 	test "$$('/usr/libexec/PlistBuddy' -c 'Print :com.apple.security.application-groups:0' ios/Keyboard/HexKeyboardExtension.entitlements)" = group.com.nmarch213.HexKeyboardTracer

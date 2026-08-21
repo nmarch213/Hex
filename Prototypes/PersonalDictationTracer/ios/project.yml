@@ -54,6 +54,7 @@ targets:
     info:
       path: Keyboard/Info.plist
       properties:
+        CFBundleDisplayName: Hex Prototype
         NSExtension:
           NSExtensionAttributes:
             IsASCIICapable: true
