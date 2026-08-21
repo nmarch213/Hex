@@ -1,4 +1,5 @@
 /.derivedData/
+/.deviceDerivedData/
 /.simDerivedData/
 /.signedDerivedData/
 /HexKeyboardTracer.xcodeproj/
