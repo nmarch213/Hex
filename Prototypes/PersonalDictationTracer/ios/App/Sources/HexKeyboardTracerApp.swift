@@ -117,6 +117,7 @@ private struct DictationTracerView: View {
             }
             .onAppear {
                 controller.refreshMailbox()
+                controller.resumePendingCaptureIfNeeded()
             }
         }
     }

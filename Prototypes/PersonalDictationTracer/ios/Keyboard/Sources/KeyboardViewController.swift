@@ -370,11 +370,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
                 if didOpen {
                     self.renderState(note: "Record in Hex, then return here")
                 } else {
-                    PrototypeMailbox.fail(
-                        id: requestID,
-                        message: "iOS rejected the keyboard-to-app handoff."
-                    )
-                    self.renderState(note: "iOS rejected the app handoff")
+                    self.renderState(note: "Open Hex manually")
                 }
             }
         }
@@ -398,7 +394,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func statusForCurrentRecord() -> String {
         guard let record = PrototypeMailbox.current() else { return "Ready" }
         return switch record.state {
-        case .captureRequested: "Opening Hex…"
+        case .captureRequested: "Open Hex manually"
         case .capturing: "Recording in Hex…"
         case .processing: "Transcribing…"
         case .completed: "Transcript ready"

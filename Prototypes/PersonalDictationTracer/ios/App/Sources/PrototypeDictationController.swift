@@ -78,6 +78,19 @@ final class PrototypeDictationController: NSObject, ObservableObject {
         mailboxRecord = PrototypeMailbox.current()
     }
 
+    func resumePendingCaptureIfNeeded() {
+        guard
+            !isBusy,
+            !isRecording,
+            let record = PrototypeMailbox.current(),
+            record.state == .captureRequested
+        else {
+            return
+        }
+
+        Task { await startRecording(requestedID: record.id) }
+    }
+
     private func startRecording(requestedID: UUID? = nil) async {
         guard !isBusy else { return }
         isBusy = true
