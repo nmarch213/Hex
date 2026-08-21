@@ -4,6 +4,7 @@ struct PrototypeMailboxRecord: Codable, Equatable, Sendable {
     enum State: String, Codable, Sendable {
         case captureRequested
         case capturing
+        case stopRequested
         case processing
         case completed
         case consumed
@@ -11,6 +12,7 @@ struct PrototypeMailboxRecord: Codable, Equatable, Sendable {
     }
 
     var id: UUID
+    var documentIdentifier: UUID?
     var createdAt: Date
     var state: State
     var rawTranscript: String
@@ -47,11 +49,12 @@ enum PrototypeMailbox {
     }
 
     @discardableResult
-    static func requestCapture() -> UUID {
+    static func requestCapture(documentIdentifier: UUID? = nil) -> UUID {
         let id = UUID()
         save(
             PrototypeMailboxRecord(
                 id: id,
+                documentIdentifier: documentIdentifier,
                 createdAt: Date(),
                 state: .captureRequested,
                 rawTranscript: "",
@@ -75,6 +78,9 @@ enum PrototypeMailbox {
         save(
             PrototypeMailboxRecord(
                 id: id,
+                documentIdentifier: current().flatMap {
+                    $0.id == id ? $0.documentIdentifier : nil
+                },
                 createdAt: createdAt,
                 state: .capturing,
                 rawTranscript: "",
@@ -89,6 +95,13 @@ enum PrototypeMailbox {
             )
         )
         return id
+    }
+
+    static func requestStop(id: UUID) {
+        update(id: id) { record in
+            guard record.state == .capturing else { return }
+            record.state = .stopRequested
+        }
     }
 
     static func markProcessing(id: UUID, recordingStoppedAt: Date = Date()) {
@@ -129,6 +142,7 @@ enum PrototypeMailbox {
         save(
             PrototypeMailboxRecord(
                 id: UUID(),
+                documentIdentifier: nil,
                 createdAt: Date(),
                 state: .completed,
                 rawTranscript: transcript,

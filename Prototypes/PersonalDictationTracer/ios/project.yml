@@ -28,6 +28,8 @@ targets:
       path: App/Info.plist
       properties:
         NSMicrophoneUsageDescription: Hex records your voice so your private Ronin server can transcribe it.
+        UIBackgroundModes:
+          - audio
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
             CFBundleURLName: com.nmarch213.HexKeyboardTracer

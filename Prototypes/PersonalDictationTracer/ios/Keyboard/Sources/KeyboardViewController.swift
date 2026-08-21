@@ -43,6 +43,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private var shiftState = ShiftState.lowercase
     private var lastShiftTap: Date?
     private var keyButtons: [(key: Key, button: UIButton)] = []
+    private var stateTimer: Timer?
 
     var enableInputClicksWhenVisible: Bool { true }
 
@@ -65,7 +66,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
         let button = UIButton(configuration: configuration)
         button.accessibilityIdentifier = "hex.dictate"
-        button.accessibilityHint = "Opens Hex to record speech for this text field"
+        button.accessibilityHint = "Starts or stops Hex voice entry for this text field"
         button.addTarget(self, action: #selector(handleDictationButton), for: .touchUpInside)
         return button
     }()
@@ -89,7 +90,14 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        startStatePolling()
         consumeAndInsertIfAvailable()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stateTimer?.invalidate()
+        stateTimer = nil
     }
 
     override func viewWillLayoutSubviews() {
@@ -343,23 +351,43 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             return
         }
 
-        if PrototypeMailbox.current()?.state == .completed {
+        guard let record = PrototypeMailbox.current() else {
+            startDictationOrOpenHex()
+            return
+        }
+
+        switch record.state {
+        case .completed:
             consumeAndInsertIfAvailable()
-        } else {
-            openHexAndRecord()
+        case .capturing:
+            PrototypeMailbox.requestStop(id: record.id)
+            renderState(note: "Stopping…")
+        case .captureRequested, .stopRequested, .processing:
+            renderState(note: statusForCurrentRecord())
+        case .consumed, .failed:
+            startDictationOrOpenHex()
         }
     }
 
-    private func openHexAndRecord() {
-        let requestID = PrototypeMailbox.requestCapture()
-        guard let url = URL(string: "hextracer://record?id=\(requestID.uuidString)") else {
-            PrototypeMailbox.fail(id: requestID, message: "Could not construct the handoff URL.")
-            renderState(note: "Could not start dictation")
+    private func startDictationOrOpenHex() {
+        guard PrototypeWarmSession.current()?.isReady() == true else {
+            openHexToArm()
+            return
+        }
+
+        PrototypeMailbox.requestCapture(
+            documentIdentifier: textDocumentProxy.documentIdentifier
+        )
+        renderState(note: "Starting…")
+    }
+
+    private func openHexToArm() {
+        guard let url = URL(string: "hextracer://arm") else {
+            renderState(note: "Open Hex to Arm")
             return
         }
         guard let extensionContext else {
-            PrototypeMailbox.fail(id: requestID, message: "Keyboard extension context is unavailable.")
-            renderState(note: "Could not start dictation")
+            renderState(note: "Open Hex to Arm")
             return
         }
 
@@ -368,17 +396,61 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             Task { @MainActor in
                 guard let self else { return }
                 if didOpen {
-                    self.renderState(note: "Record in Hex, then return here")
+                    self.renderState(note: "Tap Arm & Swipe Back")
                 } else {
-                    self.renderState(note: "Open Hex manually")
+                    self.renderState(note: "Open Hex to Arm")
                 }
             }
+        }
+    }
+
+    private func startStatePolling() {
+        stateTimer?.invalidate()
+        stateTimer = Timer.scheduledTimer(
+            timeInterval: 0.1,
+            target: self,
+            selector: #selector(pollState),
+            userInfo: nil,
+            repeats: true
+        )
+    }
+
+    @objc private func pollState() {
+        failInterruptedRequestIfNeeded()
+        if PrototypeMailbox.current()?.state == .completed {
+            consumeAndInsertIfAvailable()
+        } else {
+            renderState(note: statusForCurrentRecord())
+        }
+    }
+
+    private func failInterruptedRequestIfNeeded() {
+        guard
+            PrototypeWarmSession.current()?.isReady() != true,
+            let record = PrototypeMailbox.current()
+        else {
+            return
+        }
+
+        switch record.state {
+        case .captureRequested, .capturing, .stopRequested, .processing:
+            PrototypeMailbox.fail(
+                id: record.id,
+                message: "Hex is no longer armed. Open Hex to Arm."
+            )
+        case .completed, .consumed, .failed:
+            break
         }
     }
 
     private func consumeAndInsertIfAvailable() {
         guard hasFullAccess else {
             renderState(note: "Allow Full Access in Settings")
+            return
+        }
+        if let expectedDocument = PrototypeMailbox.current()?.documentIdentifier,
+           expectedDocument != textDocumentProxy.documentIdentifier {
+            renderState(note: "Return to the original field to insert")
             return
         }
         guard let consumed = PrototypeMailbox.consumeCompleted() else {
@@ -392,13 +464,26 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func statusForCurrentRecord() -> String {
-        guard let record = PrototypeMailbox.current() else { return "Ready" }
+        guard let record = PrototypeMailbox.current() else {
+            return PrototypeWarmSession.current()?.isReady() == true
+                ? "Voice ready"
+                : "Open Hex to Arm"
+        }
         return switch record.state {
-        case .captureRequested: "Open Hex manually"
-        case .capturing: "Recording in Hex…"
+        case .captureRequested: "Starting…"
+        case .capturing: "Recording…"
+        case .stopRequested: "Stopping…"
         case .processing: "Transcribing…"
         case .completed: "Transcript ready"
-        case .consumed: "Ready"
+        case .consumed:
+            if let insertedAt = record.insertedAt,
+               Date().timeIntervalSince(insertedAt) < 2 {
+                "Transcript inserted"
+            } else if PrototypeWarmSession.current()?.isReady() == true {
+                "Voice ready"
+            } else {
+                "Open Hex to Arm"
+            }
         case .failed: record.errorMessage ?? "Dictation failed"
         }
     }
@@ -414,12 +499,36 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         }
 
         let state = PrototypeMailbox.current()?.state
-        dictationButton.configuration?.image = UIImage(
-            systemName: state == .completed ? "arrow.down.to.line" : "mic.fill"
-        )
-        dictationButton.configuration?.title = state == .completed ? "Insert Transcript" : "Dictate"
-        dictationButton.isEnabled = state != .captureRequested
-            && state != .capturing
-            && state != .processing
+        switch state {
+        case .capturing:
+            dictationButton.configuration?.image = UIImage(systemName: "stop.fill")
+            dictationButton.configuration?.title = "Stop"
+            dictationButton.configuration?.baseBackgroundColor = .systemRed
+            dictationButton.isEnabled = true
+        case .captureRequested:
+            dictationButton.configuration?.image = UIImage(systemName: "mic.fill")
+            dictationButton.configuration?.title = "Starting…"
+            dictationButton.configuration?.baseBackgroundColor = .systemBlue
+            dictationButton.isEnabled = false
+        case .stopRequested, .processing:
+            dictationButton.configuration?.image = UIImage(systemName: "waveform")
+            dictationButton.configuration?.title = "Transcribing…"
+            dictationButton.configuration?.baseBackgroundColor = .systemBlue
+            dictationButton.isEnabled = false
+        case .completed:
+            dictationButton.configuration?.image = UIImage(systemName: "arrow.down.to.line")
+            dictationButton.configuration?.title = "Insert Transcript"
+            dictationButton.configuration?.baseBackgroundColor = .systemBlue
+            dictationButton.isEnabled = true
+        case .consumed, .failed, nil:
+            dictationButton.configuration?.image = UIImage(systemName: "mic.fill")
+            dictationButton.configuration?.baseBackgroundColor = .systemBlue
+            if PrototypeWarmSession.current()?.isReady() == true {
+                dictationButton.configuration?.title = "Dictate"
+            } else {
+                dictationButton.configuration?.title = "Open Hex to Arm"
+            }
+            dictationButton.isEnabled = true
+        }
     }
 }

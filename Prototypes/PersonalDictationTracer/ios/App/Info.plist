@@ -33,5 +33,9 @@
 	<string>1</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Hex records your voice so your private Ronin server can transcribe it.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 </dict>
 </plist>

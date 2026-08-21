@@ -4,14 +4,14 @@
 
 This vertical-slice tracer proves the shortest supported iOS path:
 
-1. The containing app records an English WAV.
+1. The containing app keeps an explicitly armed audio session alive and records an English WAV when the keyboard requests it.
 2. It uploads the WAV to a private Hex proxy on Ronin.
 3. The proxy invokes `parakeet.cpp` with the exact `tdt-0.6b-v2` model alias.
 4. As temporary tracer instrumentation, the app runs the real Hex word-removal, remapping, and formatting code.
-5. An App Group mailbox exposes the Final Transcript to the custom keyboard.
-6. The keyboard durably marks it consumed before attempting one insertion when it becomes active.
+5. An App Group mailbox carries start/stop commands and exposes the Final Transcript to the custom keyboard.
+6. The keyboard verifies the originating text field, durably marks the transcript consumed, and inserts it once.
 
-iOS does not give custom keyboard extensions microphone access. The containing app is therefore the supported capture surface; launching it directly from the keyboard remains a separate physical-device probe.
+iOS does not give custom keyboard extensions microphone access. The containing app therefore owns capture while the keyboard controls it through the App Group. The user must first tap **Arm & Swipe Back**, and iOS shows the orange microphone indicator while the 15-minute session is armed.
 
 The accepted production boundary is different from step 4: Ronin owns a versioned Transcript Profile, applies it, and returns the Final Transcript. The client-side configuration is removed once that profile API exists.
 
@@ -58,13 +58,13 @@ The Compose service binds only to Ronin loopback on port 8787. Expose that loopb
 2. If the default identifiers are unavailable, change both bundle identifiers and change `PrototypeMailbox.appGroupID` plus both entitlements to one matching App Group.
 3. Run **Hex Keyboard Tracer** on the phone once.
 4. Add **Hex Prototype** under **Settings → General → Keyboard → Keyboards → Add New Keyboard**.
-5. Enable **Allow Full Access**. The first tracer does not need networking, but the final tailnet probe will.
-6. For the narrow mailbox test, enter distinctive text and tap **Seed Final Transcript**.
-7. For the supported vertical slice, enter the Ronin bearer token, tap **Record**, speak, then tap **Stop & Transcribe**. The token is stored in the device Keychain; the server origin is pinned in the prototype.
-8. Open Notes, focus a normal text field, and select **Hex Prototype** with the globe key. The transcript should insert automatically.
-9. For the keyboard handoff probe, clear the mailbox and tap **Open Hex & Record** from the keyboard. Record whether iOS opens Hex and recording starts automatically.
-10. Stop transcription in Hex, return to Notes, and select **Hex Prototype**. The transcript should insert automatically and show the same request as `consumed`.
-11. Switch away and back to **Hex Prototype**. The text must not insert a second time.
+5. Enable **Allow Full Access** so the keyboard can use the shared command and transcript container.
+6. Enter the Ronin bearer token, tap **Arm & Swipe Back**, and swipe back to Notes. The token is stored in the device Keychain; the server origin is pinned in the prototype.
+7. Focus a normal text field and select **Hex Prototype** with the globe key. Its status should read **Voice ready**.
+8. Tap **Dictate**, speak, then tap the red **Stop** button in the keyboard. Keep the keyboard visible while it transcribes.
+9. The Final Transcript should insert automatically into the field where Dictate started. The keyboard remains usable for ordinary typing throughout the flow.
+10. Tap **Dictate** again to prove the armed session can capture more than once without reopening Hex.
+11. Switch away and back to **Hex Prototype** after insertion. The text must not insert a second time.
 
 Record the phone model, iOS version, request ID, first insertion result, and second-activation result on [Prove one-time transcript insertion from the iOS keyboard](https://github.com/nmarch213/Hex/issues/9). Copy the displayed **Parakeet**, **Service total**, **Round trip**, **Return to insertion**, and **Stop to insertion** timings to [Establish the latency baseline and regression gate](https://github.com/nmarch213/Hex/issues/8); the first successful physical run becomes the prototype baseline.
 
@@ -75,4 +75,4 @@ Record the phone model, iOS version, request ID, first insertion result, and sec
 - Whether `textDocumentProxy.insertText` delivers the Final Transcript at the active cursor.
 - Whether the durable consumed marker prevents a second insertion attempt on keyboard reactivation.
 
-The **Open Hex & Record** button is the isolated probe for the undocumented keyboard-to-companion launch transition. A rejected launch is a valid result; it must not be mistaken for a supported iOS contract.
+If the armed session expires, Hex is killed, or its heartbeat disappears, the keyboard fails closed with **Open Hex to Arm**. iOS may reject the keyboard's best-effort attempt to open Hex; opening the app manually is the supported fallback.

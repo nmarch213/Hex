@@ -22,13 +22,19 @@ final class PrototypeDictationController: NSObject, ObservableObject {
     }
     @Published private(set) var isRecording = false
     @Published private(set) var isBusy = false
+    @Published private(set) var isArmed = false
     @Published private(set) var status = "Ready to record."
     @Published private(set) var mailboxRecord: PrototypeMailboxRecord?
+    @Published private(set) var warmSessionRecord: PrototypeWarmSessionRecord?
 
     private let preferences = UserDefaults.standard
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
     private var requestID: UUID?
+    private var warmRecorder: AVAudioRecorder?
+    private var warmRecordingURL: URL?
+    private var warmCommandTask: Task<Void, Never>?
+    private var lastHeartbeatAt = Date.distantPast
 
     override init() {
         let keychainToken = PrototypeCredentialStore.loadToken()
@@ -48,14 +54,25 @@ final class PrototypeDictationController: NSObject, ObservableObject {
     func toggleRecording() {
         if isRecording {
             stopAndTranscribe()
+        } else if isArmed {
+            disarmWarmSession()
         } else {
-            Task { await startRecording() }
+            Task { await armWarmSession() }
         }
     }
 
     func handleKeyboardLaunch(_ url: URL) {
+        guard url.scheme == "hextracer" else {
+            status = "Ignored an invalid keyboard handoff URL."
+            return
+        }
+
+        if url.host == "arm" {
+            status = "Tap Arm & Swipe Back to enable keyboard Dictation."
+            return
+        }
+
         guard
-            url.scheme == "hextracer",
             url.host == "record",
             let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
             let rawID = components.queryItems?.first(where: { $0.name == "id" })?.value,
@@ -76,19 +93,113 @@ final class PrototypeDictationController: NSObject, ObservableObject {
 
     func refreshMailbox() {
         mailboxRecord = PrototypeMailbox.current()
+        warmSessionRecord = PrototypeWarmSession.current()
     }
 
-    func resumePendingCaptureIfNeeded() {
-        guard
-            !isBusy,
-            !isRecording,
-            let record = PrototypeMailbox.current(),
-            record.state == .captureRequested
-        else {
+    private func armWarmSession() async {
+        guard !isBusy, !isArmed else { return }
+        isBusy = true
+        status = "Checking microphone permission…"
+
+        guard await hasMicrophonePermission() else {
+            isBusy = false
+            status = "Microphone permission is required."
             return
         }
 
-        Task { await startRecording(requestedID: record.id) }
+        abandonInterruptedRequestIfNeeded()
+        let sessionRecord = PrototypeWarmSession.arm()
+        do {
+            try configureAudioSession()
+            try startWarmRecorder(sessionID: sessionRecord.id)
+            isArmed = true
+            isBusy = false
+            lastHeartbeatAt = Date()
+            warmSessionRecord = PrototypeWarmSession.current()
+            status = "Armed for 15 minutes. Swipe back, then tap Dictate in the Hex keyboard."
+            startWarmCommandLoop(sessionID: sessionRecord.id)
+        } catch {
+            isBusy = false
+            PrototypeWarmSession.fail(id: sessionRecord.id, message: error.localizedDescription)
+            warmSessionRecord = PrototypeWarmSession.current()
+            status = "Could not arm keyboard Dictation: \(error.localizedDescription)"
+            stopWarmRecorder()
+            try? AVAudioSession.sharedInstance().setActive(
+                false,
+                options: .notifyOthersOnDeactivation
+            )
+        }
+    }
+
+    private func abandonInterruptedRequestIfNeeded() {
+        guard let record = PrototypeMailbox.current() else { return }
+        switch record.state {
+        case .captureRequested, .capturing, .stopRequested, .processing:
+            PrototypeMailbox.fail(
+                id: record.id,
+                message: "The previous dictation was interrupted. Tap Dictate to try again."
+            )
+            refreshMailbox()
+        case .completed, .consumed, .failed:
+            break
+        }
+    }
+
+    private func disarmWarmSession(expired: Bool = false) {
+        guard !isRecording else { return }
+        warmCommandTask?.cancel()
+        warmCommandTask = nil
+        stopWarmRecorder()
+        isArmed = false
+        PrototypeWarmSession.clear()
+        warmSessionRecord = nil
+        try? AVAudioSession.sharedInstance().setActive(
+            false,
+            options: .notifyOthersOnDeactivation
+        )
+        status = expired
+            ? "Keyboard Dictation expired. Arm it again when you are ready."
+            : "Keyboard Dictation disarmed."
+    }
+
+    private func startWarmCommandLoop(sessionID: UUID) {
+        warmCommandTask?.cancel()
+        warmCommandTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.pollWarmCommands(sessionID: sessionID)
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+    }
+
+    private func pollWarmCommands(sessionID: UUID) async {
+        guard isArmed else { return }
+
+        let now = Date()
+        if now.timeIntervalSince(lastHeartbeatAt) >= 1 {
+            PrototypeWarmSession.heartbeat(id: sessionID, at: now)
+            warmSessionRecord = PrototypeWarmSession.current()
+            lastHeartbeatAt = now
+        }
+
+        if let session = PrototypeWarmSession.current(),
+           session.id == sessionID,
+           session.expiresAt <= now,
+           !isBusy {
+            disarmWarmSession(expired: true)
+            return
+        }
+
+        guard let record = PrototypeMailbox.current() else { return }
+        switch record.state {
+        case .captureRequested where !isBusy:
+            await startRecording(requestedID: record.id)
+        case .stopRequested where isRecording:
+            stopAndTranscribe()
+        default:
+            break
+        }
     }
 
     private func startRecording(requestedID: UUID? = nil) async {
@@ -107,6 +218,11 @@ final class PrototypeDictationController: NSObject, ObservableObject {
         }
 
         do {
+            if isArmed {
+                stopWarmRecorder()
+            }
+            try configureAudioSession()
+
             let id = PrototypeMailbox.beginCapture(id: requestedID)
             requestID = id
             let fileURL = FileManager.default.temporaryDirectory
@@ -114,20 +230,9 @@ final class PrototypeDictationController: NSObject, ObservableObject {
             recordingURL = fileURL
             try? FileManager.default.removeItem(at: fileURL)
 
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.record, mode: .measurement)
-            try session.setActive(true)
-
             let recorder = try AVAudioRecorder(
                 url: fileURL,
-                settings: [
-                    AVFormatIDKey: kAudioFormatLinearPCM,
-                    AVSampleRateKey: 16_000,
-                    AVNumberOfChannelsKey: 1,
-                    AVLinearPCMBitDepthKey: 32,
-                    AVLinearPCMIsFloatKey: true,
-                    AVLinearPCMIsBigEndianKey: false,
-                ]
+                settings: recordingSettings
             )
             guard recorder.prepareToRecord(), recorder.record() else {
                 throw RecordingError.couldNotStart
@@ -135,6 +240,10 @@ final class PrototypeDictationController: NSObject, ObservableObject {
 
             self.recorder = recorder
             isRecording = true
+            if let sessionID = warmSessionRecord?.id {
+                PrototypeWarmSession.extend(id: sessionID)
+                warmSessionRecord = PrototypeWarmSession.current()
+            }
             status = "Recording English audio…"
             refreshMailbox()
         } catch {
@@ -143,7 +252,14 @@ final class PrototypeDictationController: NSObject, ObservableObject {
             if let requestID {
                 PrototypeMailbox.fail(id: requestID, message: error.localizedDescription)
             }
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            if isArmed {
+                restoreWarmRecorderOrDisarm()
+            } else {
+                try? AVAudioSession.sharedInstance().setActive(
+                    false,
+                    options: .notifyOthersOnDeactivation
+                )
+            }
             if let recordingURL {
                 try? FileManager.default.removeItem(at: recordingURL)
             }
@@ -166,11 +282,19 @@ final class PrototypeDictationController: NSObject, ObservableObject {
         recorder.stop()
         self.recorder = nil
         isRecording = false
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         let recordingStoppedAt = Date()
         PrototypeMailbox.markProcessing(id: requestID, recordingStoppedAt: recordingStoppedAt)
         refreshMailbox()
         status = "Uploading to Ronin…"
+
+        if isArmed {
+            restoreWarmRecorderOrDisarm()
+        } else {
+            try? AVAudioSession.sharedInstance().setActive(
+                false,
+                options: .notifyOthersOnDeactivation
+            )
+        }
 
         Task {
             defer {
@@ -210,13 +334,78 @@ final class PrototypeDictationController: NSObject, ObservableObject {
                     upstreamMilliseconds: response.timings.upstreamMS,
                     serviceMilliseconds: response.timings.totalMS
                 )
-                status = "Transcript ready. Switch to the Hex Prototype keyboard to insert it."
+                if let sessionID = warmSessionRecord?.id {
+                    PrototypeWarmSession.extend(id: sessionID)
+                    warmSessionRecord = PrototypeWarmSession.current()
+                }
+                status = isArmed
+                    ? "Transcript ready. The Hex keyboard will insert it."
+                    : "Transcript ready. Switch to the Hex Prototype keyboard to insert it."
             } catch {
                 PrototypeMailbox.fail(id: requestID, message: error.localizedDescription)
                 status = "Transcription failed: \(error.localizedDescription)"
             }
             refreshMailbox()
         }
+    }
+
+    private func configureAudioSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.record, mode: .measurement, options: [.allowBluetoothHFP])
+        try session.setActive(true)
+    }
+
+    private func startWarmRecorder(sessionID: UUID) throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hex-warm-\(sessionID.uuidString).wav")
+        try? FileManager.default.removeItem(at: fileURL)
+
+        let recorder = try AVAudioRecorder(url: fileURL, settings: recordingSettings)
+        guard recorder.prepareToRecord(), recorder.record() else {
+            throw RecordingError.couldNotStart
+        }
+
+        warmRecorder = recorder
+        warmRecordingURL = fileURL
+    }
+
+    private func stopWarmRecorder() {
+        warmRecorder?.stop()
+        warmRecorder = nil
+        if let warmRecordingURL {
+            try? FileManager.default.removeItem(at: warmRecordingURL)
+        }
+        warmRecordingURL = nil
+    }
+
+    private func restoreWarmRecorderOrDisarm() {
+        guard isArmed, let sessionID = warmSessionRecord?.id else { return }
+        do {
+            try startWarmRecorder(sessionID: sessionID)
+            PrototypeWarmSession.extend(id: sessionID)
+            warmSessionRecord = PrototypeWarmSession.current()
+        } catch {
+            PrototypeWarmSession.fail(id: sessionID, message: error.localizedDescription)
+            warmSessionRecord = PrototypeWarmSession.current()
+            warmCommandTask?.cancel()
+            warmCommandTask = nil
+            isArmed = false
+            try? AVAudioSession.sharedInstance().setActive(
+                false,
+                options: .notifyOthersOnDeactivation
+            )
+        }
+    }
+
+    private var recordingSettings: [String: Any] {
+        [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: 16_000,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsBigEndianKey: false,
+        ]
     }
 
     private func hasMicrophonePermission() async -> Bool {

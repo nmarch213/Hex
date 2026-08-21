@@ -6,12 +6,20 @@ struct PrototypeMailboxSmoke {
     static func main() {
         PrototypeMailbox.clear()
 
-        let requestID = PrototypeMailbox.requestCapture()
+        let documentIdentifier = UUID()
+        let requestID = PrototypeMailbox.requestCapture(
+            documentIdentifier: documentIdentifier
+        )
         require(state: .captureRequested, id: requestID)
+        precondition(PrototypeMailbox.current()?.documentIdentifier == documentIdentifier)
 
         let captureID = PrototypeMailbox.beginCapture(id: requestID)
         precondition(captureID == requestID)
         require(state: .capturing, id: requestID)
+        precondition(PrototypeMailbox.current()?.documentIdentifier == documentIdentifier)
+
+        PrototypeMailbox.requestStop(id: requestID)
+        require(state: .stopRequested, id: requestID)
 
         PrototypeMailbox.markProcessing(id: requestID)
         require(state: .processing, id: requestID)
@@ -37,6 +45,20 @@ struct PrototypeMailboxSmoke {
 
         PrototypeMailbox.clear()
         precondition(PrototypeMailbox.current() == nil)
+
+        PrototypeWarmSession.clear()
+        let session = PrototypeWarmSession.arm()
+        precondition(PrototypeWarmSession.current()?.isReady() == true)
+        PrototypeWarmSession.extend(id: session.id)
+        guard let extendedSession = PrototypeWarmSession.current() else {
+            preconditionFailure("Warm session disappeared after extension")
+        }
+        precondition(extendedSession.expiresAt >= session.expiresAt)
+        PrototypeWarmSession.fail(id: session.id, message: "interrupted")
+        precondition(PrototypeWarmSession.current()?.state == .unavailable)
+        PrototypeWarmSession.clear()
+        precondition(PrototypeWarmSession.current() == nil)
+
         print("Prototype mailbox smoke test passed")
     }
 
