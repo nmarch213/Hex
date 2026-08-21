@@ -1,0 +1,25 @@
+services:
+  parakeet:
+    image: ghcr.io/mudler/parakeet.cpp-server@sha256:4a5d92e41356cb5d691e3644d31cf4cc2c0be1536f165fff9f2c5ec852c29348
+    command: ["--model", "tdt-0.6b-v2", "--port", "8080"]
+    environment:
+      XDG_CACHE_HOME: /models
+    expose:
+      - "8080"
+    volumes:
+      - parakeet-models:/models
+    restart: unless-stopped
+
+  hex-proxy:
+    build: .
+    environment:
+      HEX_PROXY_TOKEN: ${HEX_PROXY_TOKEN:?set HEX_PROXY_TOKEN in server/.env}
+      HEX_UPSTREAM_URL: http://parakeet:8080/v1/audio/transcriptions
+    depends_on:
+      - parakeet
+    ports:
+      - "127.0.0.1:8787:8787"
+    restart: unless-stopped
+
+volumes:
+  parakeet-models:
