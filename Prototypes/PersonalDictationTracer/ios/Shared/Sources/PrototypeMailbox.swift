@@ -99,7 +99,9 @@ enum PrototypeMailbox {
 
     static func requestStop(id: UUID) {
         update(id: id) { record in
-            guard record.state == .capturing else { return }
+            guard record.state == .captureRequested || record.state == .capturing else {
+                return
+            }
             record.state = .stopRequested
         }
     }

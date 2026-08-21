@@ -1,7 +1,7 @@
 import Foundation
 
 struct PrototypeWarmSessionRecord: Codable, Equatable, Sendable {
-    private static let heartbeatTolerance: TimeInterval = 3
+    private static let heartbeatTolerance: TimeInterval = 10
 
     enum State: String, Codable, Sendable {
         case armed

@@ -56,6 +56,10 @@ private struct DictationTracerView: View {
 
                 Section("Private server") {
                     LabeledContent("Origin", value: controller.serverURLString)
+                    LabeledContent(
+                        "Credential",
+                        value: controller.token.isEmpty ? "Missing" : "Stored"
+                    )
                     SecureField("Bearer token", text: $controller.token)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()

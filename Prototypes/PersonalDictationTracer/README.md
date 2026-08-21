@@ -61,9 +61,9 @@ The Compose service binds only to Ronin loopback on port 8787. Expose that loopb
 5. Enable **Allow Full Access** so the keyboard can use the shared command and transcript container.
 6. Enter the Ronin bearer token, tap **Arm & Swipe Back**, and swipe back to Notes. The token is stored in the device Keychain; the server origin is pinned in the prototype.
 7. Focus a normal text field and select **Hex Prototype** with the globe key. Its status should read **Voice ready**.
-8. Tap **Dictate**, speak, then tap the red **Stop** button in the keyboard. Keep the keyboard visible while it transcribes.
+8. Tap **Start Voice**, speak, then tap the red **Stop Voice** button in the keyboard. Keep the keyboard visible while it transcribes.
 9. The Final Transcript should insert automatically into the field where Dictate started. The keyboard remains usable for ordinary typing throughout the flow.
-10. Tap **Dictate** again to prove the armed session can capture more than once without reopening Hex.
+10. Tap **Start Voice** again to prove the armed session can capture more than once without reopening Hex.
 11. Switch away and back to **Hex Prototype** after insertion. The text must not insert a second time.
 
 Record the phone model, iOS version, request ID, first insertion result, and second-activation result on [Prove one-time transcript insertion from the iOS keyboard](https://github.com/nmarch213/Hex/issues/9). Copy the displayed **Parakeet**, **Service total**, **Round trip**, **Return to insertion**, and **Stop to insertion** timings to [Establish the latency baseline and regression gate](https://github.com/nmarch213/Hex/issues/8); the first successful physical run becomes the prototype baseline.

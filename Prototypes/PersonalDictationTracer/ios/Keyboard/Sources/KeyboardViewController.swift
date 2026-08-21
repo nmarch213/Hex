@@ -62,7 +62,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         configuration.cornerStyle = .capsule
         configuration.image = UIImage(systemName: "mic.fill")
         configuration.imagePadding = 7
-        configuration.title = "Dictate"
+        configuration.title = "Start Voice"
 
         let button = UIButton(configuration: configuration)
         button.accessibilityIdentifier = "hex.dictate"
@@ -88,9 +88,13 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         renderState(note: "Ready")
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        startStatePolling()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        startStatePolling()
         consumeAndInsertIfAvailable()
     }
 
@@ -359,10 +363,10 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         switch record.state {
         case .completed:
             consumeAndInsertIfAvailable()
-        case .capturing:
+        case .captureRequested, .capturing:
             PrototypeMailbox.requestStop(id: record.id)
             renderState(note: "Stopping…")
-        case .captureRequested, .stopRequested, .processing:
+        case .stopRequested, .processing:
             renderState(note: statusForCurrentRecord())
         case .consumed, .failed:
             startDictationOrOpenHex()
@@ -406,13 +410,15 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     private func startStatePolling() {
         stateTimer?.invalidate()
-        stateTimer = Timer.scheduledTimer(
+        let timer = Timer(
             timeInterval: 0.1,
             target: self,
             selector: #selector(pollState),
             userInfo: nil,
             repeats: true
         )
+        RunLoop.main.add(timer, forMode: .common)
+        stateTimer = timer
     }
 
     @objc private func pollState() {
@@ -466,21 +472,21 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func statusForCurrentRecord() -> String {
         guard let record = PrototypeMailbox.current() else {
             return PrototypeWarmSession.current()?.isReady() == true
-                ? "Voice ready"
+                ? "Voice ready • tap Start Voice"
                 : "Open Hex to Arm"
         }
         return switch record.state {
-        case .captureRequested: "Starting…"
-        case .capturing: "Recording…"
-        case .stopRequested: "Stopping…"
-        case .processing: "Transcribing…"
+        case .captureRequested: "Starting • tap Stop to cancel"
+        case .capturing: "Recording • tap Stop here"
+        case .stopRequested: "Stopping recording…"
+        case .processing: "Ronin is transcribing…"
         case .completed: "Transcript ready"
         case .consumed:
             if let insertedAt = record.insertedAt,
                Date().timeIntervalSince(insertedAt) < 2 {
                 "Transcript inserted"
             } else if PrototypeWarmSession.current()?.isReady() == true {
-                "Voice ready"
+                "Voice ready • tap Start Voice"
             } else {
                 "Open Hex to Arm"
             }
@@ -500,19 +506,14 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
         let state = PrototypeMailbox.current()?.state
         switch state {
-        case .capturing:
+        case .captureRequested, .capturing:
             dictationButton.configuration?.image = UIImage(systemName: "stop.fill")
-            dictationButton.configuration?.title = "Stop"
+            dictationButton.configuration?.title = "Stop Voice"
             dictationButton.configuration?.baseBackgroundColor = .systemRed
             dictationButton.isEnabled = true
-        case .captureRequested:
-            dictationButton.configuration?.image = UIImage(systemName: "mic.fill")
-            dictationButton.configuration?.title = "Starting…"
-            dictationButton.configuration?.baseBackgroundColor = .systemBlue
-            dictationButton.isEnabled = false
         case .stopRequested, .processing:
             dictationButton.configuration?.image = UIImage(systemName: "waveform")
-            dictationButton.configuration?.title = "Transcribing…"
+            dictationButton.configuration?.title = "Sending…"
             dictationButton.configuration?.baseBackgroundColor = .systemBlue
             dictationButton.isEnabled = false
         case .completed:
@@ -524,7 +525,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             dictationButton.configuration?.image = UIImage(systemName: "mic.fill")
             dictationButton.configuration?.baseBackgroundColor = .systemBlue
             if PrototypeWarmSession.current()?.isReady() == true {
-                dictationButton.configuration?.title = "Dictate"
+                dictationButton.configuration?.title = "Start Voice"
             } else {
                 dictationButton.configuration?.title = "Open Hex to Arm"
             }

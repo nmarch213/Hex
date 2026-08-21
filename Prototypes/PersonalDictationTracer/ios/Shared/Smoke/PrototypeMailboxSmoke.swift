@@ -6,6 +6,11 @@ struct PrototypeMailboxSmoke {
     static func main() {
         PrototypeMailbox.clear()
 
+        let earlyStopRequestID = PrototypeMailbox.requestCapture()
+        PrototypeMailbox.requestStop(id: earlyStopRequestID)
+        require(state: .stopRequested, id: earlyStopRequestID)
+        PrototypeMailbox.clear()
+
         let documentIdentifier = UUID()
         let requestID = PrototypeMailbox.requestCapture(
             documentIdentifier: documentIdentifier

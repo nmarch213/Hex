@@ -99,6 +99,19 @@ final class PrototypeDictationController: NSObject, ObservableObject {
     private func armWarmSession() async {
         guard !isBusy, !isArmed else { return }
         isBusy = true
+        status = "Checking Ronin…"
+
+        do {
+            try await PrototypeRoninClient.verifyReady(
+                serverURLString: serverURLString,
+                token: token
+            )
+        } catch {
+            isBusy = false
+            status = "Could not arm: \(error.localizedDescription)"
+            return
+        }
+
         status = "Checking microphone permission…"
 
         guard await hasMicrophonePermission() else {
@@ -197,6 +210,9 @@ final class PrototypeDictationController: NSObject, ObservableObject {
             await startRecording(requestedID: record.id)
         case .stopRequested where isRecording:
             stopAndTranscribe()
+        case .stopRequested where !isBusy:
+            PrototypeMailbox.fail(id: record.id, message: "Dictation stopped.")
+            refreshMailbox()
         default:
             break
         }
@@ -214,6 +230,17 @@ final class PrototypeDictationController: NSObject, ObservableObject {
                 PrototypeMailbox.fail(id: requestedID, message: status)
                 refreshMailbox()
             }
+            return
+        }
+
+        if let requestedID,
+           let record = PrototypeMailbox.current(),
+           record.id == requestedID,
+           record.state == .stopRequested {
+            isBusy = false
+            PrototypeMailbox.fail(id: requestedID, message: "Dictation stopped.")
+            status = "Dictation stopped."
+            refreshMailbox()
             return
         }
 
