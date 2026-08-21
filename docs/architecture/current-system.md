@@ -98,6 +98,16 @@ The current workflow also collapses Dictation origin and delivery onto one Mac. 
 
 Keep Tailscale reachability, application authentication, and HTTP transport outside speech-recognition semantics. Transport should authenticate and materialize a request before crossing the provider-neutral transcription boundary.
 
+## Selected settings ownership
+
+Ronin is the canonical owner of one versioned Transcript Profile: the Selected Model, Word Removals, Word Remappings, spoken-punctuation rules, and Output Formatting. The service applies that profile and returns the Final Transcript; network clients do not reinterpret the Raw Transcript. Responses identify the applied profile revision so the result remains explainable when settings change.
+
+The Mac and iPhone may both edit the profile. An edit includes the revision it was based on, and Ronin rejects stale revisions rather than silently overwriting a newer edit. The Mac caches the last accepted profile and may continue existing local Dictation with that revision while offline. The iPhone has no offline fallback: if it cannot reach Ronin and receive a Final Transcript, the Dictation fails closed.
+
+Device Interaction Settings remain local to each device. This includes Input Device selection, Recording Hotkeys, Recording Feedback, keyboard handoff, and operating-system interaction. They do not belong in the Transcript Profile merely because multiple clients expose them.
+
+The tracer's fixed phone-side transforms are temporary prototype instrumentation. They must be removed when the profile API exists; the accepted production boundary has Ronin produce the Final Transcript for mobile requests.
+
 ## Fork and security boundaries to resolve
 
 - The sandbox allows outbound network connections but has no inbound network-server entitlement.

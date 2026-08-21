@@ -7,11 +7,13 @@ This vertical-slice tracer proves the shortest supported iOS path:
 1. The containing app records an English WAV.
 2. It uploads the WAV to a private Hex proxy on Ronin.
 3. The proxy invokes `parakeet.cpp` with the exact `tdt-0.6b-v2` model alias.
-4. The app runs the real Hex word-removal, remapping, and formatting code.
+4. As temporary tracer instrumentation, the app runs the real Hex word-removal, remapping, and formatting code.
 5. An App Group mailbox exposes the Final Transcript to the custom keyboard.
 6. The keyboard durably marks it consumed before attempting one insertion when it becomes active.
 
 iOS does not give custom keyboard extensions microphone access. The containing app is therefore the supported capture surface; launching it directly from the keyboard remains a separate physical-device probe.
+
+The accepted production boundary is different from step 4: Ronin owns a versioned Transcript Profile, applies it, and returns the Final Transcript. The client-side configuration is removed once that profile API exists.
 
 ## Local fake round trip
 

@@ -94,6 +94,10 @@ _Avoid_: Input language
 
 ## Transcript processing
 
+**Transcript Profile**:
+The versioned collection of transcript policy shared across Hex clients, including the Selected Model, Transcript Transforms, and Output Formatting.
+_Avoid_: Shared settings, device settings
+
 **Raw Transcript**:
 The text produced directly by Transcription before user-defined transforms.
 _Avoid_: Transcript, result
@@ -149,6 +153,10 @@ The action that delivers the Last Transcript again without making a new Recordin
 _Avoid_: Copy last transcript
 
 ## Environment
+
+**Device Interaction Settings**:
+Preferences governing how one device activates, captures, signals, and delivers a Dictation without changing the meaning of its Final Transcript.
+_Avoid_: Transcript Profile, shared settings
 
 **Input Device**:
 The microphone used to capture a Recording Session, either explicitly selected or inherited from the system default.
