@@ -14,6 +14,7 @@ struct PrototypeMailboxRecord: Codable, Equatable, Sendable {
     var id: UUID
     var documentIdentifier: UUID?
     var createdAt: Date
+    var stopRequestedAt: Date?
     var state: State
     var rawTranscript: String
     var transcript: String
@@ -40,12 +41,22 @@ struct PrototypeMailboxRecord: Codable, Equatable, Sendable {
 enum PrototypeMailbox {
     static let appGroupID = "group.com.nmarch213.HexKeyboardTracer"
     private static let recordKey = "prototype.final-transcript"
+    private static let stopRequestKey = "prototype.stop-request"
+
+    private struct StopRequest: Codable {
+        var id: UUID
+        var requestedAt: Date
+    }
 
     static func current() -> PrototypeMailboxRecord? {
-        guard let data = try? Data(contentsOf: recordURL) else {
-            return nil
+        guard var record = storedRecord() else { return nil }
+        if let stopRequest = currentStopRequest(),
+           stopRequest.id == record.id,
+           record.state == .captureRequested || record.state == .capturing {
+            record.state = .stopRequested
+            record.stopRequestedAt = record.stopRequestedAt ?? stopRequest.requestedAt
         }
-        return try? JSONDecoder().decode(PrototypeMailboxRecord.self, from: data)
+        return record
     }
 
     @discardableResult
@@ -56,6 +67,7 @@ enum PrototypeMailbox {
                 id: id,
                 documentIdentifier: documentIdentifier,
                 createdAt: Date(),
+                stopRequestedAt: nil,
                 state: .captureRequested,
                 rawTranscript: "",
                 transcript: "",
@@ -74,14 +86,14 @@ enum PrototypeMailbox {
     @discardableResult
     static func beginCapture(id requestedID: UUID? = nil) -> UUID {
         let id = requestedID ?? UUID()
-        let createdAt = current().flatMap { $0.id == id ? $0.createdAt : nil } ?? Date()
+        let existingRecord = current().flatMap { $0.id == id ? $0 : nil }
+        let createdAt = existingRecord?.createdAt ?? Date()
         save(
             PrototypeMailboxRecord(
                 id: id,
-                documentIdentifier: current().flatMap {
-                    $0.id == id ? $0.documentIdentifier : nil
-                },
+                documentIdentifier: existingRecord?.documentIdentifier,
                 createdAt: createdAt,
+                stopRequestedAt: existingRecord?.stopRequestedAt,
                 state: .capturing,
                 rawTranscript: "",
                 transcript: "",
@@ -98,11 +110,16 @@ enum PrototypeMailbox {
     }
 
     static func requestStop(id: UUID) {
+        let requestedAt = Date()
+        saveStopRequest(StopRequest(id: id, requestedAt: requestedAt))
         update(id: id) { record in
             guard record.state == .captureRequested || record.state == .capturing else {
                 return
             }
             record.state = .stopRequested
+            if record.stopRequestedAt == nil {
+                record.stopRequestedAt = requestedAt
+            }
         }
     }
 
@@ -146,6 +163,7 @@ enum PrototypeMailbox {
                 id: UUID(),
                 documentIdentifier: nil,
                 createdAt: Date(),
+                stopRequestedAt: nil,
                 state: .completed,
                 rawTranscript: transcript,
                 transcript: transcript,
@@ -178,6 +196,7 @@ enum PrototypeMailbox {
 
     static func clear() {
         try? FileManager.default.removeItem(at: recordURL)
+        try? FileManager.default.removeItem(at: stopRequestURL)
     }
 
     private static let recordURL: URL = {
@@ -197,6 +216,25 @@ enum PrototypeMailbox {
         return containerURL.appendingPathComponent("\(recordKey).json")
     }()
 
+    private static let stopRequestURL = recordURL
+        .deletingLastPathComponent()
+        .appendingPathComponent("\(stopRequestKey).json")
+
+    private static func storedRecord() -> PrototypeMailboxRecord? {
+        guard let data = try? Data(contentsOf: recordURL) else { return nil }
+        return try? JSONDecoder().decode(PrototypeMailboxRecord.self, from: data)
+    }
+
+    private static func currentStopRequest() -> StopRequest? {
+        guard let data = try? Data(contentsOf: stopRequestURL) else { return nil }
+        return try? JSONDecoder().decode(StopRequest.self, from: data)
+    }
+
+    private static func saveStopRequest(_ request: StopRequest) {
+        guard let data = try? JSONEncoder().encode(request) else { return }
+        try? data.write(to: stopRequestURL, options: .atomic)
+    }
+
     private static func update(id: UUID, mutation: (inout PrototypeMailboxRecord) -> Void) {
         guard var record = current(), record.id == id else {
             return
@@ -211,6 +249,6 @@ enum PrototypeMailbox {
         guard (try? data.write(to: recordURL, options: .atomic)) != nil else {
             return false
         }
-        return current() == record
+        return storedRecord() == record
     }
 }

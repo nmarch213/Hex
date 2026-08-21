@@ -9,6 +9,19 @@ struct PrototypeMailboxSmoke {
         let earlyStopRequestID = PrototypeMailbox.requestCapture()
         PrototypeMailbox.requestStop(id: earlyStopRequestID)
         require(state: .stopRequested, id: earlyStopRequestID)
+        guard let earlyStopRequestedAt = PrototypeMailbox.current()?.stopRequestedAt else {
+            preconditionFailure("Early Stop timestamp was not preserved")
+        }
+        precondition(
+            PrototypeWarmCaptureCommand.nextAction(
+                for: .stopRequested,
+                isBusy: false,
+                isRecording: false
+            ) == .startThenStop
+        )
+        PrototypeMailbox.beginCapture(id: earlyStopRequestID)
+        require(state: .stopRequested, id: earlyStopRequestID)
+        precondition(PrototypeMailbox.current()?.stopRequestedAt == earlyStopRequestedAt)
         PrototypeMailbox.clear()
 
         let documentIdentifier = UUID()

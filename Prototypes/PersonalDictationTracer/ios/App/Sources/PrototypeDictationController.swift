@@ -33,6 +33,9 @@ final class PrototypeDictationController: NSObject, ObservableObject {
     private var requestID: UUID?
     private var warmRecorder: AVAudioRecorder?
     private var warmRecordingURL: URL?
+    private var warmRecordingStartedAt: Date?
+    private var captureRequestedAt: Date?
+    private var captureUsesWarmRecorder = false
     private var warmCommandTask: Task<Void, Never>?
     private var lastHeartbeatAt = Date.distantPast
 
@@ -68,7 +71,14 @@ final class PrototypeDictationController: NSObject, ObservableObject {
         }
 
         if url.host == "arm" {
-            status = "Tap Arm & Swipe Back to enable keyboard Dictation."
+            if isArmed {
+                status = "Keyboard Dictation is already armed. Swipe back to keep typing."
+            } else if isBusy {
+                status = "Hex is already preparing keyboard Dictation."
+            } else {
+                status = "Opening from the keyboard. Arming automatically…"
+                Task { await armWarmSession() }
+            }
             return
         }
 
@@ -129,7 +139,7 @@ final class PrototypeDictationController: NSObject, ObservableObject {
             isBusy = false
             lastHeartbeatAt = Date()
             warmSessionRecord = PrototypeWarmSession.current()
-            status = "Armed for 15 minutes. Swipe back, then tap Dictate in the Hex keyboard."
+            status = "Armed for 15 minutes. Swipe back, then tap Start Voice in the Hex keyboard."
             startWarmCommandLoop(sessionID: sessionRecord.id)
         } catch {
             isBusy = false
@@ -150,7 +160,7 @@ final class PrototypeDictationController: NSObject, ObservableObject {
         case .captureRequested, .capturing, .stopRequested, .processing:
             PrototypeMailbox.fail(
                 id: record.id,
-                message: "The previous dictation was interrupted. Tap Dictate to try again."
+                message: "The previous dictation was interrupted. Tap Start Voice to try again."
             )
             refreshMailbox()
         case .completed, .consumed, .failed:
@@ -205,15 +215,21 @@ final class PrototypeDictationController: NSObject, ObservableObject {
         }
 
         guard let record = PrototypeMailbox.current() else { return }
-        switch record.state {
-        case .captureRequested where !isBusy:
+        switch PrototypeWarmCaptureCommand.nextAction(
+            for: record.state,
+            isBusy: isBusy,
+            isRecording: isRecording
+        ) {
+        case .start:
             await startRecording(requestedID: record.id)
-        case .stopRequested where isRecording:
+        case .stop:
             stopAndTranscribe()
-        case .stopRequested where !isBusy:
-            PrototypeMailbox.fail(id: record.id, message: "Dictation stopped.")
-            refreshMailbox()
-        default:
+        case .startThenStop:
+            await startRecording(requestedID: record.id)
+            if isRecording {
+                stopAndTranscribe()
+            }
+        case .none:
             break
         }
     }
@@ -233,25 +249,43 @@ final class PrototypeDictationController: NSObject, ObservableObject {
             return
         }
 
-        if let requestedID,
-           let record = PrototypeMailbox.current(),
-           record.id == requestedID,
-           record.state == .stopRequested {
-            isBusy = false
-            PrototypeMailbox.fail(id: requestedID, message: "Dictation stopped.")
-            status = "Dictation stopped."
-            refreshMailbox()
-            return
-        }
-
         do {
-            if isArmed {
-                stopWarmRecorder()
+            if !(isArmed && warmRecorder?.isRecording == true) {
+                try configureAudioSession()
             }
-            try configureAudioSession()
 
+            let pendingRecord = requestedID.flatMap { requestedID in
+                PrototypeMailbox.current().flatMap { record in
+                    record.id == requestedID ? record : nil
+                }
+            }
+            let shouldStopAfterStart = pendingRecord?.state == .stopRequested
             let id = PrototypeMailbox.beginCapture(id: requestedID)
             requestID = id
+            captureRequestedAt = pendingRecord?.createdAt ?? Date()
+
+            if isArmed {
+                guard
+                    warmRecorder?.isRecording == true,
+                    warmRecordingURL != nil,
+                    warmRecordingStartedAt != nil
+                else {
+                    throw RecordingError.couldNotStart
+                }
+                captureUsesWarmRecorder = true
+                isRecording = true
+                if shouldStopAfterStart {
+                    PrototypeMailbox.requestStop(id: id)
+                }
+                if let sessionID = warmSessionRecord?.id {
+                    PrototypeWarmSession.extend(id: sessionID)
+                    warmSessionRecord = PrototypeWarmSession.current()
+                }
+                status = "Recording English audio…"
+                refreshMailbox()
+                return
+            }
+
             let fileURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("hex-\(id.uuidString).wav")
             recordingURL = fileURL
@@ -266,7 +300,11 @@ final class PrototypeDictationController: NSObject, ObservableObject {
             }
 
             self.recorder = recorder
+            captureUsesWarmRecorder = false
             isRecording = true
+            if shouldStopAfterStart {
+                PrototypeMailbox.requestStop(id: id)
+            }
             if let sessionID = warmSessionRecord?.id {
                 PrototypeWarmSession.extend(id: sessionID)
                 warmSessionRecord = PrototypeWarmSession.current()
@@ -292,24 +330,84 @@ final class PrototypeDictationController: NSObject, ObservableObject {
             }
             recordingURL = nil
             requestID = nil
+            captureRequestedAt = nil
+            captureUsesWarmRecorder = false
             refreshMailbox()
         }
     }
 
     private func stopAndTranscribe() {
-        guard
-            let recorder,
-            let recordingURL,
-            let requestID
-        else {
+        guard let requestID else {
             status = "No active recording."
             return
         }
 
-        recorder.stop()
-        self.recorder = nil
+        let mailboxRecord = PrototypeMailbox.current().flatMap { record in
+            record.id == requestID ? record : nil
+        }
+        let recordingStoppedAt = mailboxRecord?.stopRequestedAt ?? Date()
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hex-\(requestID.uuidString).wav")
+
+        do {
+            if captureUsesWarmRecorder {
+                guard
+                    let warmRecorder,
+                    let warmRecordingURL,
+                    let warmRecordingStartedAt,
+                    let captureRequestedAt
+                else {
+                    throw RecordingError.couldNotStart
+                }
+
+                warmRecorder.stop()
+                self.warmRecorder = nil
+                self.warmRecordingURL = nil
+                self.warmRecordingStartedAt = nil
+                defer { try? FileManager.default.removeItem(at: warmRecordingURL) }
+                try? FileManager.default.removeItem(at: outputURL)
+                try extractWarmCapture(
+                    from: warmRecordingURL,
+                    warmStartedAt: warmRecordingStartedAt,
+                    captureStartedAt: captureRequestedAt,
+                    captureStoppedAt: recordingStoppedAt,
+                    to: outputURL
+                )
+            } else {
+                guard let recorder, let recordingURL else {
+                    throw RecordingError.couldNotStart
+                }
+                recorder.stop()
+                self.recorder = nil
+                guard recordingURL == outputURL else {
+                    throw RecordingError.couldNotPrepareAudio
+                }
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: outputURL)
+            self.recorder = nil
+            self.recordingURL = nil
+            isRecording = false
+            isBusy = false
+            captureRequestedAt = nil
+            captureUsesWarmRecorder = false
+            PrototypeMailbox.fail(id: requestID, message: error.localizedDescription)
+            status = "Could not prepare dictation: \(error.localizedDescription)"
+            if isArmed {
+                stopWarmRecorder()
+                restoreWarmRecorderOrDisarm()
+            } else {
+                try? AVAudioSession.sharedInstance().setActive(
+                    false,
+                    options: .notifyOthersOnDeactivation
+                )
+            }
+            refreshMailbox()
+            return
+        }
+
+        recordingURL = outputURL
         isRecording = false
-        let recordingStoppedAt = Date()
         PrototypeMailbox.markProcessing(id: requestID, recordingStoppedAt: recordingStoppedAt)
         refreshMailbox()
         status = "Uploading to Ronin…"
@@ -325,15 +423,17 @@ final class PrototypeDictationController: NSObject, ObservableObject {
 
         Task {
             defer {
-                try? FileManager.default.removeItem(at: recordingURL)
+                try? FileManager.default.removeItem(at: outputURL)
                 self.recordingURL = nil
                 self.requestID = nil
+                captureRequestedAt = nil
+                captureUsesWarmRecorder = false
                 isBusy = false
             }
 
             do {
                 let response = try await PrototypeRoninClient.transcribe(
-                    recordingURL: recordingURL,
+                    recordingURL: outputURL,
                     serverURLString: serverURLString,
                     token: token,
                     requestID: requestID
@@ -394,6 +494,7 @@ final class PrototypeDictationController: NSObject, ObservableObject {
 
         warmRecorder = recorder
         warmRecordingURL = fileURL
+        warmRecordingStartedAt = Date()
     }
 
     private func stopWarmRecorder() {
@@ -403,6 +504,47 @@ final class PrototypeDictationController: NSObject, ObservableObject {
             try? FileManager.default.removeItem(at: warmRecordingURL)
         }
         warmRecordingURL = nil
+        warmRecordingStartedAt = nil
+    }
+
+    private func extractWarmCapture(
+        from sourceURL: URL,
+        warmStartedAt: Date,
+        captureStartedAt: Date,
+        captureStoppedAt: Date,
+        to outputURL: URL
+    ) throws {
+        let source = try AVAudioFile(forReading: sourceURL)
+        let sampleRate = source.processingFormat.sampleRate
+        let startSeconds = max(0, captureStartedAt.timeIntervalSince(warmStartedAt))
+        let stopSeconds = max(startSeconds, captureStoppedAt.timeIntervalSince(warmStartedAt))
+        let startFrame = min(
+            source.length,
+            AVAudioFramePosition(startSeconds * sampleRate)
+        )
+        let stopFrame = min(
+            source.length,
+            AVAudioFramePosition(stopSeconds * sampleRate)
+        )
+        let frameCount = stopFrame - startFrame
+        guard frameCount > 0, frameCount <= AVAudioFramePosition(UInt32.max) else {
+            throw RecordingError.emptyRecording
+        }
+
+        source.framePosition = startFrame
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: source.processingFormat,
+            frameCapacity: AVAudioFrameCount(frameCount)
+        ) else {
+            throw RecordingError.couldNotPrepareAudio
+        }
+        try source.read(into: buffer, frameCount: AVAudioFrameCount(frameCount))
+        guard buffer.frameLength > 0 else {
+            throw RecordingError.emptyRecording
+        }
+
+        let output = try AVAudioFile(forWriting: outputURL, settings: recordingSettings)
+        try output.write(from: buffer)
     }
 
     private func restoreWarmRecorderOrDisarm() {
@@ -461,6 +603,8 @@ final class PrototypeDictationController: NSObject, ObservableObject {
 
     private enum RecordingError: LocalizedError {
         case couldNotStart
+        case couldNotPrepareAudio
+        case emptyRecording
         case emptyTranscript
         case emptyFinalTranscript
 
@@ -468,6 +612,10 @@ final class PrototypeDictationController: NSObject, ObservableObject {
             switch self {
             case .couldNotStart:
                 "The audio recorder could not start."
+            case .couldNotPrepareAudio:
+                "Hex could not prepare the recorded audio."
+            case .emptyRecording:
+                "No speech was captured. Tap Start Voice before speaking."
             case .emptyTranscript:
                 "Parakeet returned an empty transcript."
             case .emptyFinalTranscript:

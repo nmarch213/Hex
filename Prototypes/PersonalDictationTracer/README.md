@@ -59,10 +59,10 @@ The Compose service binds only to Ronin loopback on port 8787. Expose that loopb
 3. Run **Hex Keyboard Tracer** on the phone once.
 4. Add **Hex Prototype** under **Settings → General → Keyboard → Keyboards → Add New Keyboard**.
 5. Enable **Allow Full Access** so the keyboard can use the shared command and transcript container.
-6. Enter the Ronin bearer token, tap **Arm & Swipe Back**, and swipe back to Notes. The token is stored in the device Keychain; the server origin is pinned in the prototype.
+6. Enter the Ronin bearer token, then tap **Arm & Swipe Back** in Hex—or tap **Open Hex to Arm** in the keyboard and let Hex arm automatically. Swipe back to Notes when Hex says it is armed. The token is stored in the device Keychain; the server origin is pinned in the prototype.
 7. Focus a normal text field and select **Hex Prototype** with the globe key. Its status should read **Voice ready**.
 8. Tap **Start Voice**, speak, then tap the red **Stop Voice** button in the keyboard. Keep the keyboard visible while it transcribes.
-9. The Final Transcript should insert automatically into the field where Dictate started. The keyboard remains usable for ordinary typing throughout the flow.
+9. The Final Transcript should insert automatically into the field where Start Voice was tapped. The keyboard remains usable for ordinary typing throughout the flow.
 10. Tap **Start Voice** again to prove the armed session can capture more than once without reopening Hex.
 11. Switch away and back to **Hex Prototype** after insertion. The text must not insert a second time.
 

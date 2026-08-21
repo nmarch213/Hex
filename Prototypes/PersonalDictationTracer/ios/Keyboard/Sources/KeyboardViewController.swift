@@ -400,7 +400,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             Task { @MainActor in
                 guard let self else { return }
                 if didOpen {
-                    self.renderState(note: "Tap Arm & Swipe Back")
+                    self.renderState(note: "Hex is arming • swipe back when ready")
                 } else {
                     self.renderState(note: "Open Hex to Arm")
                 }

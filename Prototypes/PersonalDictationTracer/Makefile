@@ -28,6 +28,7 @@ smoke-mailbox:
 		-swift-version 6 \
 		-strict-concurrency=complete \
 		ios/Shared/Sources/PrototypeMailbox.swift \
+		ios/Shared/Sources/PrototypeWarmCaptureCommand.swift \
 		ios/Shared/Sources/PrototypeWarmSession.swift \
 		ios/Shared/Smoke/PrototypeMailboxSmoke.swift \
 		-o ios/.derivedData/prototype-mailbox-smoke

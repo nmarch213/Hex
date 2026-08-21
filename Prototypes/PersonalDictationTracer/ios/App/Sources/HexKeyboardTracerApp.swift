@@ -34,7 +34,7 @@ private struct DictationTracerView: View {
 
                     Text(
                         controller.isArmed
-                            ? "Swipe back to the app where you want to type. In the Hex keyboard, tap Dictate, speak, then tap Stop. Keep Hex armed while you dictate; iOS shows the orange microphone indicator."
+                            ? "Swipe back to the app where you want to type. In the Hex keyboard, tap Start Voice, speak, then tap Stop Voice. Keep Hex armed while you dictate; iOS shows the orange microphone indicator."
                             : "Arm Hex once, then swipe back. The keyboard can start and stop voice entry without leaving your text field."
                     )
                     .font(.caption)
