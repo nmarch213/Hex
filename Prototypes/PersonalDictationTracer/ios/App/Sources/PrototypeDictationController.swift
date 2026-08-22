@@ -101,6 +101,17 @@ final class PrototypeDictationController: NSObject, ObservableObject {
         Task { await startRecording(requestedID: requestedID) }
     }
 
+    func handleArmShortcut() {
+        if isArmed {
+            status = "Keyboard Dictation is already armed. Swipe back to keep typing."
+        } else if isBusy {
+            status = "Hex is already preparing keyboard Dictation."
+        } else {
+            status = "Opened from Arm Hex. Arming automatically…"
+            Task { await armWarmSession() }
+        }
+    }
+
     func refreshMailbox() {
         mailboxRecord = PrototypeMailbox.current()
         warmSessionRecord = PrototypeWarmSession.current()

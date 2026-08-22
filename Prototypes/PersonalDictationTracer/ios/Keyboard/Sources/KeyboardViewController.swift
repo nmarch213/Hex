@@ -356,7 +356,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         }
 
         guard let record = PrototypeMailbox.current() else {
-            startDictationOrOpenHex()
+            startDictationOrPromptArm()
             return
         }
 
@@ -369,13 +369,13 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         case .stopRequested, .processing:
             renderState(note: statusForCurrentRecord())
         case .consumed, .failed:
-            startDictationOrOpenHex()
+            startDictationOrPromptArm()
         }
     }
 
-    private func startDictationOrOpenHex() {
+    private func startDictationOrPromptArm() {
         guard PrototypeWarmSession.current()?.isReady() == true else {
-            openHexToArm()
+            renderState(note: "Hold the Action Button to Arm Hex")
             return
         }
 
@@ -383,29 +383,6 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             documentIdentifier: textDocumentProxy.documentIdentifier
         )
         renderState(note: "Starting…")
-    }
-
-    private func openHexToArm() {
-        guard let url = URL(string: "hextracer://arm") else {
-            renderState(note: "Open Hex to Arm")
-            return
-        }
-        guard let extensionContext else {
-            renderState(note: "Open Hex to Arm")
-            return
-        }
-
-        renderState(note: "Opening Hex…")
-        extensionContext.open(url) { [weak self] didOpen in
-            Task { @MainActor in
-                guard let self else { return }
-                if didOpen {
-                    self.renderState(note: "Hex is arming • swipe back when ready")
-                } else {
-                    self.renderState(note: "Open Hex to Arm")
-                }
-            }
-        }
     }
 
     private func startStatePolling() {
@@ -442,7 +419,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         case .captureRequested, .capturing, .stopRequested, .processing:
             PrototypeMailbox.fail(
                 id: record.id,
-                message: "Hex is no longer armed. Open Hex to Arm."
+                message: "Hex is no longer armed. Use the Arm Hex shortcut."
             )
         case .completed, .consumed, .failed:
             break
@@ -473,7 +450,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         guard let record = PrototypeMailbox.current() else {
             return PrototypeWarmSession.current()?.isReady() == true
                 ? "Voice ready • tap Start Voice"
-                : "Open Hex to Arm"
+                : "Hold the Action Button to Arm Hex"
         }
         return switch record.state {
         case .captureRequested: "Starting • tap Stop to cancel"
@@ -488,7 +465,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             } else if PrototypeWarmSession.current()?.isReady() == true {
                 "Voice ready • tap Start Voice"
             } else {
-                "Open Hex to Arm"
+                "Hold the Action Button to Arm Hex"
             }
         case .failed: record.errorMessage ?? "Dictation failed"
         }
@@ -527,7 +504,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             if PrototypeWarmSession.current()?.isReady() == true {
                 dictationButton.configuration?.title = "Start Voice"
             } else {
-                dictationButton.configuration?.title = "Open Hex to Arm"
+                dictationButton.configuration?.title = "Arm with Action Button"
             }
             dictationButton.isEnabled = true
         }

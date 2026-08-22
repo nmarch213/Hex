@@ -11,7 +11,7 @@ This vertical-slice tracer proves the shortest supported iOS path:
 5. An App Group mailbox carries start/stop commands and exposes the Final Transcript to the custom keyboard.
 6. The keyboard verifies the originating text field, durably marks the transcript consumed, and inserts it once.
 
-iOS does not give custom keyboard extensions microphone access. The containing app therefore owns capture while the keyboard controls it through the App Group. The user must first tap **Arm & Swipe Back**, and iOS shows the orange microphone indicator while the 15-minute session is armed.
+iOS does not give custom keyboard extensions microphone access. The containing app therefore owns capture while the keyboard controls it through the App Group. The user first runs the **Arm Hex** App Shortcut—ideally from the iPhone Action Button—and swipes back once. iOS shows the orange microphone indicator while the 15-minute session is armed.
 
 The accepted production boundary is different from step 4: Ronin owns a versioned Transcript Profile, applies it, and returns the Final Transcript. The client-side configuration is removed once that profile API exists.
 
@@ -59,12 +59,13 @@ The Compose service binds only to Ronin loopback on port 8787. Expose that loopb
 3. Run **Hex Keyboard Tracer** on the phone once.
 4. Add **Hex Prototype** under **Settings → General → Keyboard → Keyboards → Add New Keyboard**.
 5. Enable **Allow Full Access** so the keyboard can use the shared command and transcript container.
-6. Enter the Ronin bearer token, then tap **Arm & Swipe Back** in Hex—or tap **Open Hex to Arm** in the keyboard and let Hex arm automatically. Swipe back to Notes when Hex says it is armed. The token is stored in the device Keychain; the server origin is pinned in the prototype.
-7. Focus a normal text field and select **Hex Prototype** with the globe key. Its status should read **Voice ready**.
-8. Tap **Start Voice**, speak, then tap the red **Stop Voice** button in the keyboard. Keep the keyboard visible while it transcribes.
-9. The Final Transcript should insert automatically into the field where Start Voice was tapped. The keyboard remains usable for ordinary typing throughout the flow.
-10. Tap **Start Voice** again to prove the armed session can capture more than once without reopening Hex.
-11. Switch away and back to **Hex Prototype** after insertion. The text must not insert a second time.
+6. Enter the Ronin bearer token. In **Settings → Action Button**, choose **Shortcut**, then select the **Arm Hex** App Shortcut.
+7. Return to a text field and hold the Action Button. Hex opens and arms automatically; swipe back when Hex says it is armed. The token is stored in the device Keychain; the server origin is pinned in the prototype.
+8. Select **Hex Prototype** with the globe key. Its status should read **Voice ready**.
+9. Tap **Start Voice**, speak, then tap the red **Stop Voice** button in the keyboard. Keep the keyboard visible while it transcribes.
+10. The Final Transcript should insert automatically into the field where Start Voice was tapped. The keyboard remains usable for ordinary typing throughout the flow.
+11. Tap **Start Voice** again to prove the armed session can capture more than once without reopening Hex.
+12. Switch away and back to **Hex Prototype** after insertion. The text must not insert a second time.
 
 Record the phone model, iOS version, request ID, first insertion result, and second-activation result on [Prove one-time transcript insertion from the iOS keyboard](https://github.com/nmarch213/Hex/issues/9). Copy the displayed **Parakeet**, **Service total**, **Round trip**, **Return to insertion**, and **Stop to insertion** timings to [Establish the latency baseline and regression gate](https://github.com/nmarch213/Hex/issues/8); the first successful physical run becomes the prototype baseline.
 
@@ -75,4 +76,4 @@ Record the phone model, iOS version, request ID, first insertion result, and sec
 - Whether `textDocumentProxy.insertText` delivers the Final Transcript at the active cursor.
 - Whether the durable consumed marker prevents a second insertion attempt on keyboard reactivation.
 
-If the armed session expires, Hex is killed, or its heartbeat disappears, the keyboard fails closed with **Open Hex to Arm**. iOS may reject the keyboard's best-effort attempt to open Hex; opening the app manually is the supported fallback.
+If the armed session expires, Hex is killed, or its heartbeat disappears, the keyboard fails closed with **Arm with Action Button**. iOS does not expose a supported containing-app launch API to custom keyboards, so the App Shortcut is the supported foreground handoff.
