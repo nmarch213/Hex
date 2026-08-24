@@ -45,6 +45,23 @@ test("defaults the production listener to loopback", async () => {
   assert.equal(config.serviceBuildRevision, generatedBuildRevisionFixture)
   assert.equal(Option.isNone(config.observability.otlpBaseURL), true)
   assert.equal(config.observability.environment, "production")
+  assert.equal(
+    config.observability.serviceInstanceID,
+    generatedEpochFixture
+  )
+  assert.equal(config.observability.recognition.runtime, "parakeet.cpp")
+  assert.equal(
+    config.observability.recognition.runtimeRevision,
+    "sha256:4a5d92e41356cb5d691e3644d31cf4cc2c0be1536f165fff9f2c5ec852c29348"
+  )
+  assert.equal(
+    config.observability.recognition.model,
+    "nvidia/parakeet-tdt-0.6b-v2"
+  )
+  assert.equal(
+    config.observability.recognition.modelRevision,
+    "bf0af9f425fa01809cadec671b3cb672709d13e9"
+  )
 })
 
 test("accepts only credential-free OTLP collector origins", async () => {

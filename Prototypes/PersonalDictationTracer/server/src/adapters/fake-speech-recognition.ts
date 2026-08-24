@@ -1,6 +1,7 @@
 import { Effect, Layer } from "effect"
 
 import { SpeechRecognition } from "../application/speech-recognition.js"
+import { FakeRecognitionArtifactIdentity } from "../service-metadata.js"
 
 /** Builds a deterministic recognition adapter for local contract tests. */
 export const fakeSpeechRecognitionLayer = (
@@ -10,9 +11,5 @@ export const fakeSpeechRecognitionLayer = (
     transcribe: () =>
       Effect.succeed({ transcript, upstreamMilliseconds: 0 }),
     isReady: Effect.succeed(true),
-    runtime: "fake",
-    model: "nvidia/parakeet-tdt-0.6b-v2",
-    runtimeRevision: "deterministic-fake-v1",
-    modelRevision: "deterministic-fixture-v1",
-    modelSHA256: "0".repeat(64)
+    ...FakeRecognitionArtifactIdentity
   })

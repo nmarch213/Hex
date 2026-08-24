@@ -11,6 +11,7 @@ import { elapsedMilliseconds } from "../monotonic-timing.js"
 import {
   recordRequestCompletion,
   type RequestOutcome,
+  withFreshRequestTelemetry,
   withContentFreeSpan
 } from "../observability.js"
 import { ServiceVersion, type ServiceRevision } from "../service-metadata.js"
@@ -177,7 +178,8 @@ export const requestCompletionLogging = (
           })
           yield* completionLog
         })
-      )
+      ),
+      withFreshRequestTelemetry
     )
     return yield* withContentFreeSpan(
       "hex.http.request",

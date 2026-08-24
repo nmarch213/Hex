@@ -22,6 +22,7 @@ import { ServiceVersion, type ServiceRevision } from "../service-metadata.js"
 import {
   observeStage,
   recordValidatedAudio,
+  setRequestAudioDurationBucket,
   withContentFreeSpan
 } from "../observability.js"
 
@@ -181,6 +182,7 @@ const transcribeHandler = Effect.gen(function* () {
         "hex.audio.duration_ms": audio.durationMilliseconds
       })
       yield* recordValidatedAudio(audio)
+      yield* setRequestAudioDurationBucket(audio)
       // Node's SHA-256 hex projection is lowercase and exactly 64 characters. A
       // schema failure here would therefore indicate a broken runtime invariant.
       const audioDigest = yield* observeStage(

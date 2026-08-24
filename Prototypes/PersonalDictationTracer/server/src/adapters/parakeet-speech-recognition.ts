@@ -13,11 +13,7 @@ import {
 import type { CapturedAudio } from "../domain/captured-audio.js"
 import { elapsedMilliseconds } from "../monotonic-timing.js"
 import { observeStage } from "../observability.js"
-import {
-  ParakeetModelRevision,
-  ParakeetModelSHA256,
-  ParakeetRuntimeImageDigest
-} from "../service-metadata.js"
+import { ProductionRecognitionArtifactIdentity } from "../service-metadata.js"
 
 const UpstreamResponseSchema = Schema.Struct({ text: Schema.String })
 const UpstreamHealthSchema = Schema.Struct({ status: Schema.Literal("ok") })
@@ -137,11 +133,7 @@ export const parakeetSpeechRecognitionLayer = (
       return {
         transcribe,
         isReady,
-        runtime: "parakeet.cpp",
-        model: "nvidia/parakeet-tdt-0.6b-v2",
-        runtimeRevision: ParakeetRuntimeImageDigest,
-        modelRevision: ParakeetModelRevision,
-        modelSHA256: ParakeetModelSHA256
+        ...ProductionRecognitionArtifactIdentity
       }
     })
   )

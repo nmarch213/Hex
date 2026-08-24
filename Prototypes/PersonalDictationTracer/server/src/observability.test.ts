@@ -7,6 +7,7 @@ import { Effect, Option } from "effect"
 import { TranscriptionClaimLostError } from "./application/transcription-idempotency.js"
 import {
   observabilityLayer,
+  recordRecognitionPerformance,
   recordRequestCompletion,
   withContentFreeSpan
 } from "./observability.js"
@@ -52,7 +53,15 @@ test("flushes Effect logs, metrics, and bounded spans over OTLP protobuf on scop
         otlpBaseURL: Option.some(
           new URL(`http://127.0.0.1:${address.port}`)
         ),
-        environment: "development"
+        environment: "development",
+        serviceInstanceID: "development",
+        recognition: {
+          runtime: "fake",
+          runtimeRevision: "deterministic-fake-v1",
+          model: "nvidia/parakeet-tdt-0.6b-v2",
+          modelRevision: "deterministic-fixture-v1",
+          modelSHA256: "0".repeat(64)
+        }
       },
       "development"
     )
@@ -67,6 +76,19 @@ test("flushes Effect logs, metrics, and bounded spans over OTLP protobuf on scop
           replayed: undefined,
           durationMilliseconds: 3
         })
+        for (const audioDurationMilliseconds of [
+          2_999,
+          3_000,
+          10_000,
+          30_000,
+          120_000
+        ]) {
+          yield* recordRecognitionPerformance({
+            audioDurationMilliseconds,
+            recognitionMilliseconds: 1,
+            serviceMilliseconds: 2
+          })
+        }
         yield* Effect.logInfo("telemetry_smoke")
         yield* Effect.void.pipe(
           Effect.withSpan("hex.telemetry.smoke", {
@@ -112,6 +134,30 @@ test("flushes Effect logs, metrics, and bounded spans over OTLP protobuf on scop
     const traceBodies = requests
       .filter((request) => request.path === "/v1/traces")
       .map((request) => request.body)
+    const metricExports = requests
+      .filter((request) => request.path === "/v1/metrics")
+      .flatMap((request) => decodeMetricExport(request.body))
+    const realtimeFactor = metricExports
+      .flatMap((exported) => exported.metrics)
+      .find(
+        (metric) =>
+          metric.name === "hex_dictation_recognition_realtime_factor"
+      )
+    assert.ok(realtimeFactor)
+    assert.deepEqual(
+      new Set(
+        realtimeFactor.pointAttributes.map((attributes) =>
+          attributeMap(attributes).get("audio_duration_bucket")
+        )
+      ),
+      new Set([
+        "0_to_3s",
+        "3_to_10s",
+        "10_to_30s",
+        "30_to_120s",
+        "120_to_300s"
+      ])
+    )
     const traceSpans = traceBodies.flatMap((body) =>
       decodeTraceExport(body).flatMap((exported) => exported.spans)
     )

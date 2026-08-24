@@ -44,13 +44,26 @@ if ! "${compose[@]}" pull --quiet parakeet; then
   printf 'Could not pull the pinned Parakeet image; the running service was not interrupted.\n' >&2
   exit 1
 fi
-if [[ "$HEX_COMPOSE_OVERRIDE_ACTIVE" == "1" ]] &&
-  ! "${compose[@]}" pull --quiet otel-collector; then
+if ! "${compose[@]}" pull --quiet otel-collector; then
   printf 'Could not pull the pinned OTEL collector; the running service was not interrupted.\n' >&2
+  exit 1
+fi
+if ! "${compose[@]}" pull --quiet prometheus; then
+  printf 'Could not pull the pinned Prometheus image; the running service was not interrupted.\n' >&2
   exit 1
 fi
 if ! "${compose[@]}" build hex-proxy; then
   printf 'Could not build the replacement Hex proxy; the running service was not interrupted.\n' >&2
+  exit 1
+fi
+if ! "${compose[@]}" up \
+  --detach \
+  --no-build \
+  --pull never \
+  --wait \
+  --wait-timeout "$wait_seconds" \
+  otel-collector prometheus; then
+  printf 'Latency monitoring did not become healthy; the running dictation service was not interrupted.\n' >&2
   exit 1
 fi
 
@@ -130,7 +143,8 @@ if ! "${compose[@]}" up \
   --pull never \
   --force-recreate \
   --wait \
-  --wait-timeout "$wait_seconds"; then
+  --wait-timeout "$wait_seconds" \
+  parakeet hex-proxy; then
   fail_closed 'Ronin deployment failed.'
 fi
 
@@ -139,6 +153,11 @@ if ! node "$script_directory/authenticated-health-check.mjs" \
   200; then
   fail_closed 'Ronin authenticated health verification failed.'
 fi
+if ! node "$script_directory/telemetry-health-check.mjs" \
+  "$HEX_BUILD_REVISION" \
+  "$(<"$epoch_path")"; then
+  fail_closed 'Ronin telemetry promotion verification failed.'
+fi
 
 deployment_complete=1
-printf 'Ronin service is detached and healthy on 127.0.0.1:8787.\n'
+printf 'Ronin service is detached and healthy on 127.0.0.1:8787. Latency metrics are on 127.0.0.1:9090.\n'

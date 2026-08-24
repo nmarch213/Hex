@@ -4,6 +4,7 @@ import {
   Duration,
   Effect,
   Exit,
+  FiberRef,
   Layer,
   Metric,
   MetricBoundaries,
@@ -12,7 +13,11 @@ import {
 } from "effect"
 
 import type { CapturedAudio } from "./domain/captured-audio.js"
-import { ServiceVersion, type ServiceRevision } from "./service-metadata.js"
+import {
+  ServiceVersion,
+  type RecognitionArtifactIdentity,
+  type ServiceRevision
+} from "./service-metadata.js"
 
 const MillisecondBoundaryValues = [
   1,
@@ -53,6 +58,21 @@ const AudioDurationBoundaries = MetricBoundaries.fromIterable([
   240_000,
   300_000
 ])
+const RealtimeFactorBoundaries = MetricBoundaries.fromIterable([
+  0.01,
+  0.02,
+  0.05,
+  0.1,
+  0.2,
+  0.5,
+  1,
+  2,
+  5,
+  10,
+  20,
+  40,
+  80
+])
 
 const requestCount = Metric.counter("hex_http_server_requests_total", {
   description: "Completed personal dictation HTTP requests",
@@ -78,7 +98,44 @@ const audioDuration = Metric.histogram(
   AudioDurationBoundaries,
   "Validated inbound recording duration in milliseconds"
 ).pipe(Metric.tagged("unit", "ms"))
+const successfulServiceDuration = Metric.histogram(
+  "hex_dictation_service_duration_ms",
+  MillisecondBoundaries,
+  "Successful fresh transcription latency through response preparation"
+).pipe(Metric.tagged("unit", "ms"))
+const recognitionRealtimeFactor = Metric.histogram(
+  "hex_dictation_recognition_realtime_factor",
+  RealtimeFactorBoundaries,
+  "Recognition latency divided by validated recording duration"
+)
 
+type AudioDurationBucket =
+  | "0_to_3s"
+  | "3_to_10s"
+  | "10_to_30s"
+  | "30_to_120s"
+  | "120_to_300s"
+
+type RequestAudioDurationBucket =
+  | AudioDurationBucket
+  | "unknown"
+  | "not_applicable"
+
+const currentRequestAudioDurationBucket =
+  FiberRef.unsafeMake<RequestAudioDurationBucket>("unknown")
+
+/** Maps the validated request duration to one bounded analysis dimension. */
+const audioDurationBucket = (
+  durationMilliseconds: number
+): AudioDurationBucket => {
+  if (durationMilliseconds < 3_000) return "0_to_3s"
+  if (durationMilliseconds < 10_000) return "3_to_10s"
+  if (durationMilliseconds < 30_000) return "10_to_30s"
+  if (durationMilliseconds < 120_000) return "30_to_120s"
+  return "120_to_300s"
+}
+
+/** Bounded terminal classification for one HTTP request. */
 export type RequestOutcome =
   | "success"
   | "invalid_request"
@@ -94,6 +151,7 @@ export type RequestOutcome =
   | "internal_error"
   | "request_rejected"
 
+/** Bounded processing-stage vocabulary shared by spans and histograms. */
 export type TelemetryStage =
   | "authentication"
   | "runtime_readiness"
@@ -155,7 +213,7 @@ export const recordRequestCompletion = (input: {
   readonly statusClass: "2xx" | "4xx" | "5xx" | "other"
   readonly replayed: boolean | undefined
   readonly durationMilliseconds: number
-}) => {
+}) => Effect.gen(function* () {
   const replayed =
     input.replayed === undefined ? "unknown" : String(input.replayed)
   const labels = [
@@ -165,22 +223,30 @@ export const recordRequestCompletion = (input: {
     ["status_class", input.statusClass],
     ["replayed", replayed]
   ] as const
-  const taggedCount = labels.reduce(
+  const durationBucket =
+    input.route === "/v1/transcribe"
+      ? yield* FiberRef.get(currentRequestAudioDurationBucket)
+      : "not_applicable"
+  const labelsWithDuration = [
+    ...labels,
+    ["audio_duration_bucket", durationBucket] as const
+  ]
+  const taggedCount = labelsWithDuration.reduce(
     (metric, [key, value]) => Metric.tagged(metric, key, value),
     requestCount
   )
-  const taggedDuration = labels.reduce(
+  const taggedDuration = labelsWithDuration.reduce(
     (metric, [key, value]) => Metric.tagged(metric, key, value),
     requestDuration
   )
-  return Effect.all(
+  return yield* Effect.all(
     [
       Metric.increment(taggedCount),
       Metric.update(taggedDuration, input.durationMilliseconds)
     ],
     { discard: true }
   )
-}
+})
 
 /** Records numeric recording shape without retaining audio or transcript content. */
 export const recordValidatedAudio = (audio: CapturedAudio) =>
@@ -192,10 +258,54 @@ export const recordValidatedAudio = (audio: CapturedAudio) =>
     { discard: true }
   )
 
-/** Optional OTLP export configuration selected by the composition root. */
+/** Makes the bounded recording-length class visible to completion metrics. */
+export const setRequestAudioDurationBucket = (audio: CapturedAudio) =>
+  FiberRef.set(
+    currentRequestAudioDurationBucket,
+    audioDurationBucket(audio.durationMilliseconds)
+  )
+
+/** Prevents request-local metric dimensions from crossing handler boundaries. */
+export const withFreshRequestTelemetry = <A, E, R>(
+  effect: Effect.Effect<A, E, R>
+) => Effect.locally(currentRequestAudioDurationBucket, "unknown")(effect)
+
+/** Records successful fresh inference performance without request content. */
+export const recordRecognitionPerformance = (input: {
+  readonly audioDurationMilliseconds: number
+  readonly recognitionMilliseconds: number
+  readonly serviceMilliseconds: number
+}) => {
+  const durationBucket = audioDurationBucket(input.audioDurationMilliseconds)
+  return Effect.all(
+    [
+      Metric.update(
+        Metric.tagged(
+          successfulServiceDuration,
+          "audio_duration_bucket",
+          durationBucket
+        ),
+        input.serviceMilliseconds
+      ),
+      Metric.update(
+        Metric.tagged(
+          recognitionRealtimeFactor,
+          "audio_duration_bucket",
+          durationBucket
+        ),
+        input.recognitionMilliseconds / input.audioDurationMilliseconds
+      )
+    ],
+    { discard: true }
+  )
+}
+
+/** OTLP export and immutable artifact identity selected by the composition root. */
 export interface ObservabilityConfiguration {
   readonly otlpBaseURL: Option.Option<URL>
   readonly environment: "production" | "development"
+  readonly serviceInstanceID: string
+  readonly recognition: RecognitionArtifactIdentity
 }
 
 /**
@@ -217,7 +327,12 @@ export const observabilityLayer = (
           serviceVersion: ServiceVersion,
           attributes: {
             "deployment.environment.name": config.environment,
-            "service.revision": serviceRevision
+            "service.revision": serviceRevision,
+            "service.instance.id": config.serviceInstanceID,
+            "hex.runtime.name": config.recognition.runtime,
+            "hex.runtime.revision": config.recognition.runtimeRevision,
+            "hex.model.name": config.recognition.model,
+            "hex.model.revision": config.recognition.modelRevision
           }
         },
         maxBatchSize: 256,

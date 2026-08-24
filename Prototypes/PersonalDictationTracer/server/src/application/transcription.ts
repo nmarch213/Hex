@@ -23,7 +23,10 @@ import type { CapturedAudio } from "../domain/captured-audio.js"
 import type { DevicePrincipalId } from "../domain/device-principal.js"
 import { RequestIdSchema, type RequestId } from "../domain/request-id.js"
 import { elapsedMilliseconds } from "../monotonic-timing.js"
-import { observeStage } from "../observability.js"
+import {
+  observeStage,
+  recordRecognitionPerformance
+} from "../observability.js"
 
 const MaximumTranscriptCharacters = 100_000
 
@@ -249,6 +252,12 @@ export class Transcription extends Effect.Service<Transcription>()(
                     nowEpochMilliseconds: completedAt
                   })
                 )
+                yield* recordRecognitionPerformance({
+                  audioDurationMilliseconds:
+                    request.audio.durationMilliseconds,
+                  recognitionMilliseconds: recognitionMS,
+                  serviceMilliseconds: serviceMS
+                })
                 return { response, replayed: false }
               }).pipe(
                 Effect.tapErrorTag(

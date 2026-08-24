@@ -66,9 +66,7 @@ services:
       HEX_UPSTREAM_URL: http://parakeet:8080/v1/audio/transcriptions
       HEX_IDEMPOTENCY_DB_PATH: /var/lib/hex-personal-dictation/idempotency.sqlite
       HEX_DEVICE_REGISTRY_DB_PATH: /var/lib/hex-personal-dictation/devices.sqlite
-      # Empty disables export. In production this should name an OTLP/HTTP
-      # collector reachable on hex-internal, normally http://otel-collector:4318.
-      HEX_OTLP_BASE_URL: ${HEX_OTLP_BASE_URL:-}
+      HEX_OTLP_BASE_URL: http://otel-collector:4318
     secrets:
       - source: hex_health_probe_token
         target: hex_health_probe_token
@@ -96,6 +94,91 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    logging: *bounded-json-logging
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc
+    command:
+      - --config=/etc/otelcol-contrib/config.yaml
+    user: "10001:10001"
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    expose:
+      - "4318"
+      - "9464"
+    volumes:
+      - type: bind
+        source: ./observability/otel-collector.yaml
+        target: /etc/otelcol-contrib/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - hex-internal
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+    logging: *bounded-json-logging
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus@sha256:f3b6aae627d96e7ad8256cdf6de5953247735117c6f577383fadb42efeeea7bc
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=14d
+      - --storage.tsdb.retention.size=2GB
+      - --web.listen-address=0.0.0.0:9090
+    user: "65532:65532"
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    depends_on:
+      - otel-collector
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - hex-prometheus-data:/prometheus
+      - type: bind
+        source: ./observability/prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./observability/latency.rules.yml
+        target: /etc/prometheus/latency.rules.yml
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - hex-internal
+    healthcheck:
+      test:
+        - CMD
+        - /bin/promtool
+        - check
+        - healthy
+        - --url=http://127.0.0.1:9090
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    mem_limit: 512m
+    cpus: 0.50
+    pids_limit: 128
     logging: *bounded-json-logging
     restart: unless-stopped
 
@@ -198,6 +281,7 @@ services:
 
 volumes:
   hex-proxy-data:
+  hex-prometheus-data:
 
 secrets:
   hex_health_probe_token:

@@ -1,4 +1,4 @@
-.PHONY: generate typecheck test-ios smoke-capture-storage smoke-mailbox smoke-server validate build build-release build-device-release open clean server server-configure server-rotate server-device-enroll server-device-list server-device-rotate server-device-revoke server-backup server-restore server-restore-finalize server-restore-reauthorize server-restore-auth-reset server-restore-auth-complete server-storage-drill server-status server-logs server-stop server-fake server-health
+.PHONY: generate typecheck test-ios smoke-capture-storage smoke-mailbox smoke-server validate build build-release build-device-release open clean server server-configure server-rotate server-device-enroll server-device-list server-device-rotate server-device-revoke server-backup server-restore server-restore-finalize server-restore-reauthorize server-restore-auth-reset server-restore-auth-complete server-storage-drill server-status server-logs server-stop server-fake server-health server-latency
 
 generate:
 	cd ios && xcodegen generate
@@ -200,3 +200,6 @@ server-health:
 	else \
 		node server/authenticated-health-check.mjs - 200; \
 	fi
+
+server-latency:
+	node server/latency-report.mjs

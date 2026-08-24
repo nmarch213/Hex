@@ -10,7 +10,11 @@ import {
 } from "effect"
 
 import { UpstreamProcessEpochSchema } from "./application/transcription-idempotency.js"
-import { ServiceBuildRevisionSchema } from "./service-metadata.js"
+import {
+  FakeRecognitionArtifactIdentity,
+  ProductionRecognitionArtifactIdentity,
+  ServiceBuildRevisionSchema
+} from "./service-metadata.js"
 
 const PlaintextTelemetryHosts = new Set([
   "localhost",
@@ -174,7 +178,9 @@ export const productionConfiguration = Effect.gen(function* () {
     upstreamProcessEpoch,
     observability: {
       otlpBaseURL: configuration.otlpBaseURL,
-      environment: "production" as const
+      environment: "production" as const,
+      serviceInstanceID: upstreamProcessEpoch,
+      recognition: ProductionRecognitionArtifactIdentity
     }
   }
 })
@@ -196,7 +202,9 @@ export const fakeConfiguration = Effect.gen(function* () {
     serviceBuildRevision: "development" as const,
     observability: {
       otlpBaseURL: configuration.otlpBaseURL,
-      environment: "development" as const
+      environment: "development" as const,
+      serviceInstanceID: "development",
+      recognition: FakeRecognitionArtifactIdentity
     }
   }
 })

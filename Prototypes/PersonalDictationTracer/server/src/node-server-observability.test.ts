@@ -91,6 +91,20 @@ const assertResourceIdentity = (attributes: ReadonlyArray<OtlpAttribute>) => {
   assert.equal(resource.get("service.version"), "0.0.1")
   assert.equal(resource.get("deployment.environment.name"), "development")
   assert.equal(resource.get("service.revision"), "development")
+  assert.equal(resource.get("service.instance.id"), "development")
+  assert.equal(resource.get("hex.runtime.name"), "fake")
+  assert.equal(
+    resource.get("hex.runtime.revision"),
+    "deterministic-fake-v1"
+  )
+  assert.equal(
+    resource.get("hex.model.name"),
+    "nvidia/parakeet-tdt-0.6b-v2"
+  )
+  assert.equal(
+    resource.get("hex.model.revision"),
+    "deterministic-fixture-v1"
+  )
 }
 
 const assertDescendsFromRoot = (
@@ -118,6 +132,7 @@ const assertMetricLabels = (
   const labels = attributeMap(attributes)
   const expected: Readonly<Record<string, Readonly<Record<string, ReadonlySet<string>>>>> = {
     hex_http_server_requests_total: {
+      audio_duration_bucket: new Set(["0_to_3s"]),
       route: new Set(["/v1/transcribe"]),
       method: new Set(["POST"]),
       outcome: new Set(["success"]),
@@ -126,6 +141,7 @@ const assertMetricLabels = (
     },
     hex_http_server_duration_ms: {
       unit: new Set(["ms"]),
+      audio_duration_bucket: new Set(["0_to_3s"]),
       route: new Set(["/v1/transcribe"]),
       method: new Set(["POST"]),
       outcome: new Set(["success"]),
@@ -148,7 +164,14 @@ const assertMetricLabels = (
       ])
     },
     hex_dictation_audio_bytes: { unit: new Set(["By"]) },
-    hex_dictation_audio_duration_ms: { unit: new Set(["ms"]) }
+    hex_dictation_audio_duration_ms: { unit: new Set(["ms"]) },
+    hex_dictation_service_duration_ms: {
+      unit: new Set(["ms"]),
+      audio_duration_bucket: new Set(["0_to_3s"])
+    },
+    hex_dictation_recognition_realtime_factor: {
+      audio_duration_bucket: new Set(["0_to_3s"])
+    }
   }
   const allowed = expected[name]
   if (allowed === undefined) assert.fail(`unexpected metric ${name}`)
@@ -255,7 +278,15 @@ test("live Node server exports the bounded OTLP contract and flushes on scope sh
       otlpBaseURL: Option.some(
         new URL(`http://127.0.0.1:${receiverPort}`)
       ),
-      environment: "development"
+      environment: "development",
+      serviceInstanceID: "development",
+      recognition: {
+        runtime: "fake",
+        runtimeRevision: "deterministic-fake-v1",
+        model: "nvidia/parakeet-tdt-0.6b-v2",
+        modelRevision: "deterministic-fixture-v1",
+        modelSHA256: "0".repeat(64)
+      }
     },
     "development"
   ).pipe(Layer.provide(Logger.json))
@@ -364,7 +395,9 @@ test("live Node server exports the bounded OTLP contract and flushes on scope sh
       "hex_http_server_duration_ms",
       "hex_dictation_stage_duration_ms",
       "hex_dictation_audio_bytes",
-      "hex_dictation_audio_duration_ms"
+      "hex_dictation_audio_duration_ms",
+      "hex_dictation_service_duration_ms",
+      "hex_dictation_recognition_realtime_factor"
     ])
     const hexMetrics = metrics.filter((metric) => metric.name.startsWith("hex_"))
     assert.deepEqual(

@@ -45,7 +45,8 @@ jobs:
             storage-restore.sh storage-startup-guard-smoke.sh
           node --check \
             authenticated-health-check.mjs container-upstream-stub.mjs \
-            production-container-client.mjs verify-json-logs.mjs
+            latency-report.mjs production-container-client.mjs \
+            telemetry-health-check.mjs verify-json-logs.mjs
           bash operations-lock-smoke.sh
           unsafe_output_directory="$(mktemp -d)"
           chmod 777 "$unsafe_output_directory"
@@ -144,12 +145,33 @@ jobs:
               (.services.parakeet.command[0] | contains("sha256sum --check --status")) and
               .services["hex-proxy"].environment.HEX_DEVICE_REGISTRY_DB_PATH ==
                 "/var/lib/hex-personal-dictation/devices.sqlite" and
+              .services["hex-proxy"].environment.HEX_OTLP_BASE_URL ==
+                "http://otel-collector:4318" and
               (.services["hex-proxy"].environment | has("HEX_PROXY_TOKEN") | not) and
               .networks["hex-internal"].internal == true and
               (.services["hex-proxy"].ports | length) == 1 and
               .services["hex-proxy"].ports[0].host_ip == "127.0.0.1" and
               .services["hex-proxy"].ports[0].target == 8787 and
               .services["hex-proxy"].ports[0].published == "8787" and
+              .services["otel-collector"].image ==
+                "otel/opentelemetry-collector-contrib@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc" and
+              .services["otel-collector"].ports == null and
+              .services["otel-collector"].read_only == true and
+              .services["otel-collector"].pids_limit == 64 and
+              .services["otel-collector"].mem_limit == "134217728" and
+              .services.prometheus.image ==
+                "prom/prometheus@sha256:f3b6aae627d96e7ad8256cdf6de5953247735117c6f577383fadb42efeeea7bc" and
+              (.services.prometheus.ports | length) == 1 and
+              .services.prometheus.ports[0].host_ip == "127.0.0.1" and
+              .services.prometheus.ports[0].published == "9090" and
+              .services.prometheus.ports[0].target == 9090 and
+              .services.prometheus.read_only == true and
+              .services.prometheus.pids_limit == 128 and
+              .services.prometheus.mem_limit == "536870912" and
+              any(.services.prometheus.command[];
+                . == "--storage.tsdb.retention.time=14d") and
+              any(.services.prometheus.command[];
+                . == "--storage.tsdb.retention.size=2GB") and
               .services["device-admin"].network_mode == "none" and
               .services["device-admin"].environment.HEX_HEALTH_PROBE_CREDENTIAL_FILE ==
                 "/run/secrets/hex_health_probe_token" and
@@ -165,6 +187,30 @@ jobs:
                 .target == "/var/backups/hex-personal-dictation" and
                 .read_only == true)
             ' <<<"$rendered_json" >/dev/null
+          monitoring_project=hex-observability-ci
+          cleanup_monitoring() {
+            docker compose --project-name "$monitoring_project" \
+              -f compose.yaml down --volumes >/dev/null 2>&1 || true
+          }
+          trap cleanup_monitoring EXIT
+          docker compose --project-name "$monitoring_project" \
+            -f compose.yaml up --detach --wait --wait-timeout 60 \
+            otel-collector prometheus
+          report_attempts=0
+          until node latency-report.mjs > latency-report.json; do
+            ((report_attempts += 1))
+            if ((report_attempts >= 5)); then
+              printf 'Prometheus query API did not become reachable.\n' >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          jq --exit-status \
+            'to_entries | length == 11 and all(.value; type == "array")' \
+            latency-report.json >/dev/null
+          rm latency-report.json
+          cleanup_monitoring
+          trap - EXIT
       - name: Resolve immutable external images
         run: |
           docker buildx imagetools inspect \
@@ -173,6 +219,21 @@ jobs:
           docker buildx imagetools inspect \
             ghcr.io/mudler/parakeet.cpp-server@sha256:4a5d92e41356cb5d691e3644d31cf4cc2c0be1536f165fff9f2c5ec852c29348 \
             >/dev/null
+          docker buildx imagetools inspect \
+            otel/opentelemetry-collector-contrib@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc \
+            >/dev/null
+          docker buildx imagetools inspect \
+            prom/prometheus@sha256:f3b6aae627d96e7ad8256cdf6de5953247735117c6f577383fadb42efeeea7bc \
+            >/dev/null
+          docker run --rm \
+            --volume "$PWD/observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro" \
+            otel/opentelemetry-collector-contrib@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc \
+            validate --config=/etc/otelcol-contrib/config.yaml
+          docker run --rm \
+            --entrypoint /bin/promtool \
+            --volume "$PWD/observability:/etc/prometheus:ro" \
+            prom/prometheus@sha256:f3b6aae627d96e7ad8256cdf6de5953247735117c6f577383fadb42efeeea7bc \
+            check config /etc/prometheus/prometheus.yml
           docker run --rm \
             --entrypoint sha256sum \
             ghcr.io/mudler/parakeet.cpp-server@sha256:4a5d92e41356cb5d691e3644d31cf4cc2c0be1536f165fff9f2c5ec852c29348 \
