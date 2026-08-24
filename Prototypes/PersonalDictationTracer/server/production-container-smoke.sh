@@ -13,6 +13,12 @@ upstream_container="hex-production-smoke-upstream-$suffix"
 volume_name="hex-production-smoke-data-$suffix"
 network_name="hex-production-smoke-network-$suffix"
 smoke_directory="$(mktemp -d)"
+if client_user="$(stat -c '%u:%g' "$smoke_directory" 2>/dev/null)"; then
+  :
+else
+  client_user="$(stat -f '%u:%g' "$smoke_directory")"
+fi
+[[ "$client_user" != 0:* ]]
 
 cleanup() {
   docker rm --force "$proxy_container" "$upstream_container" >/dev/null 2>&1 || true
@@ -108,6 +114,7 @@ docker run --detach --name "$proxy_container" \
 
 docker run --rm \
   --network "$network_name" \
+  --user "$client_user" \
   --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,size=16m \
   --cap-drop ALL \
