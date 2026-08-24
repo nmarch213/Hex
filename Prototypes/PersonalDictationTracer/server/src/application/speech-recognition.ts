@@ -11,7 +11,10 @@ export interface SpeechRecognitionResult {
 /** Reports that the configured recognition runtime could not serve a request. */
 export class SpeechRecognitionUnavailableError extends Schema.TaggedError<SpeechRecognitionUnavailableError>()(
   "SpeechRecognitionUnavailableError",
-  { reason: Schema.String }
+  {
+    reason: Schema.String,
+    completion: Schema.Literal("settled", "unknown")
+  }
 ) {}
 
 /** Operations supplied by a concrete speech-recognition adapter. */
@@ -22,6 +25,9 @@ export interface SpeechRecognitionService {
   readonly isReady: Effect.Effect<boolean>
   readonly runtime: string
   readonly model: string
+  readonly runtimeRevision: string
+  readonly modelRevision: string
+  readonly modelSHA256: string
 }
 
 /** The application-owned port for whichever speech-recognition runtime is selected. */

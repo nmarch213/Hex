@@ -11,5 +11,8 @@ export const fakeSpeechRecognitionLayer = (
       Effect.succeed({ transcript, upstreamMilliseconds: 0 }),
     isReady: Effect.succeed(true),
     runtime: "fake",
-    model: "nvidia/parakeet-tdt-0.6b-v2"
+    model: "nvidia/parakeet-tdt-0.6b-v2",
+    runtimeRevision: "deterministic-fake-v1",
+    modelRevision: "deterministic-fixture-v1",
+    modelSHA256: "0".repeat(64)
   })

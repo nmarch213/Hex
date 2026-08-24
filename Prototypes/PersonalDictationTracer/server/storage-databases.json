@@ -1,0 +1,58 @@
+{
+  "format": "hex-personal-dictation-storage-registry",
+  "version": 1,
+  "databases": [
+    {
+      "databaseID": "transcription-idempotency",
+      "fileName": "idempotency.sqlite",
+      "schemaUserVersion": 5,
+      "expectedSchemaFingerprintSHA256": "19a64bebf33273f527578822b769ae8ddb126a6b05a0275cef5364841da85201",
+      "maximumBytes": 268435456,
+      "containsAudio": false,
+      "allowedSchemaObjects": [
+        {
+          "type": "index",
+          "name": "transcription_idempotency_completed_at"
+        },
+        {
+          "type": "table",
+          "name": "inference_admission"
+        },
+        {
+          "type": "table",
+          "name": "storage_readiness_probe"
+        },
+        {
+          "type": "table",
+          "name": "transcription_idempotency"
+        }
+      ]
+    },
+    {
+      "databaseID": "device-registry",
+      "fileName": "devices.sqlite",
+      "schemaUserVersion": 1,
+      "expectedSchemaFingerprintSHA256": "1685edacb2115e345ae5093b96b038ba664e7c9d3955d1e1b538dd123f247ef2",
+      "maximumBytes": 4194304,
+      "containsAudio": false,
+      "allowedSchemaObjects": [
+        {
+          "type": "index",
+          "name": "device_principals_credential_digest"
+        },
+        {
+          "type": "table",
+          "name": "device_capabilities"
+        },
+        {
+          "type": "table",
+          "name": "device_principals"
+        },
+        {
+          "type": "table",
+          "name": "owner"
+        }
+      ]
+    }
+  ]
+}

@@ -204,8 +204,8 @@ This is the smallest architecture that can plausibly meet “tap the keyboard bu
 3. The app sends the captured audio to Ronin through the authenticated Tailscale HTTPS origin. The Ronin service returns the same request UUID and a Final Transcript; there is no cloud or offline fallback.
 4. The app atomically writes `{id, state: completed, transcript, documentIdentifier}` or `{id, state: failed, errorCode}`.
 5. The app posts `com.nmarch213.hex.capture-result-changed`. The keyboard observes it while visible and also polls the mailbox while a request is pending.
-6. The keyboard verifies the request UUID, current `documentIdentifier`, completion state, and non-consumed status. It inserts exactly once with `textDocumentProxy.insertText(transcript)` and marks the result `consumed`.
-7. If the keyboard extension is recreated, it reloads the durable result and can insert it on the next active view only after the same destination checks pass. If the current field no longer matches, it keeps the result in a bounded pending state and asks the user to choose where to insert it rather than inserting into an unrelated field.
+6. The keyboard verifies the request UUID, current `documentIdentifier`, completion state, and non-consumed status. It atomically consumes and erases the payload before calling `textDocumentProxy.insertText(transcript)`, providing at-most-once delivery: an extension crash in that narrow window may lose text but cannot duplicate it.
+7. If the keyboard extension is recreated before consumption, it reloads the bounded durable result and can attempt insertion on the next active view only after the same Apple text-document identity check passes. Apple does not expose a documented field identity, so switching fields within one document remains a physical-device acceptance case rather than an API guarantee. A mismatched or missing document identity requires explicit discard.
 
 ### Session-loss paths
 

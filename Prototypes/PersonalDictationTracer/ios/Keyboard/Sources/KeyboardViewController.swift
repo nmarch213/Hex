@@ -1,4 +1,5 @@
 import UIKit
+import os.log
 
 @MainActor
 final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
@@ -43,7 +44,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private var shiftState = ShiftState.lowercase
     private var lastShiftTap: Date?
     private var keyButtons: [(key: Key, button: UIButton)] = []
-    private var stateTimer: Timer?
+    private var statePollingTask: Task<Void, Never>?
+    private var latestSnapshot: PrototypeIPCSnapshot?
 
     var enableInputClicksWhenVisible: Bool { true }
 
@@ -82,6 +84,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        hasDictationKey = true
         view.backgroundColor = .secondarySystemBackground
         configureLayout()
         rebuildRows()
@@ -100,8 +103,9 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        stateTimer?.invalidate()
-        stateTimer = nil
+        statePollingTask?.cancel()
+        statePollingTask = nil
+        requestCancellationForClosingKeyboard()
     }
 
     override func viewWillLayoutSubviews() {
@@ -355,100 +359,164 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             return
         }
 
-        guard let record = PrototypeMailbox.current() else {
-            startDictationOrPromptArm()
-            return
-        }
+        do {
+            let snapshot = try PrototypeMailbox.keyboardSnapshot(
+                documentIdentifier: currentDocumentIdentifier
+            )
+            latestSnapshot = snapshot
+            guard let record = snapshot.mailbox else {
+                try startDictationOrPromptArm()
+                return
+            }
 
-        switch record.state {
-        case .completed:
-            consumeAndInsertIfAvailable()
-        case .captureRequested, .capturing:
-            PrototypeMailbox.requestStop(id: record.id)
-            renderState(note: "Stopping…")
-        case .stopRequested, .processing:
-            renderState(note: statusForCurrentRecord())
-        case .consumed, .failed:
-            startDictationOrPromptArm()
+            switch record.state {
+            case .completed:
+                if isCurrentTextDestination(for: record) {
+                    consumeAndInsertIfAvailable(snapshot: snapshot)
+                } else {
+                    try PrototypeMailbox.discardCompleted(id: record.id)
+                    refreshState(note: "Pending transcript discarded")
+                }
+            case .captureRequested, .capturing:
+                let stopRequested = try PrototypeMailbox.requestKeyboardStop(
+                    id: record.id,
+                    documentIdentifier: currentDocumentIdentifier
+                )
+                refreshState(
+                    note: stopRequested
+                        ? "Stopping…"
+                        : "Voice entry cancelled because the original text destination is unavailable"
+                )
+            case .stopRequested, .processing, .cancelRequested:
+                renderState(note: status(for: snapshot), snapshot: snapshot)
+            case .consumed, .failed:
+                try startDictationOrPromptArm()
+            }
+        } catch {
+            renderIPCFailure(error)
         }
     }
 
-    private func startDictationOrPromptArm() {
-        guard PrototypeWarmSession.current()?.isReady() == true else {
+    private func startDictationOrPromptArm() throws(PrototypeIPCError) {
+        guard try PrototypeWarmSession.current()?.isReady() == true else {
             renderState(note: "Hold the Action Button to Arm Hex")
             return
         }
 
-        PrototypeMailbox.requestCapture(
-            documentIdentifier: textDocumentProxy.documentIdentifier
-        )
-        renderState(note: "Starting…")
-    }
-
-    private func startStatePolling() {
-        stateTimer?.invalidate()
-        let timer = Timer(
-            timeInterval: 0.1,
-            target: self,
-            selector: #selector(pollState),
-            userInfo: nil,
-            repeats: true
-        )
-        RunLoop.main.add(timer, forMode: .common)
-        stateTimer = timer
-    }
-
-    @objc private func pollState() {
-        failInterruptedRequestIfNeeded()
-        if PrototypeMailbox.current()?.state == .completed {
-            consumeAndInsertIfAvailable()
-        } else {
-            renderState(note: statusForCurrentRecord())
-        }
-    }
-
-    private func failInterruptedRequestIfNeeded() {
-        guard
-            PrototypeWarmSession.current()?.isReady() != true,
-            let record = PrototypeMailbox.current()
-        else {
+        guard let documentIdentifier = currentDocumentIdentifier else {
+            renderState(note: "This text destination cannot be used for safe voice insertion")
             return
         }
 
-        switch record.state {
-        case .captureRequested, .capturing, .stopRequested, .processing:
-            PrototypeMailbox.fail(
-                id: record.id,
-                message: "Hex is no longer armed. Use the Arm Hex shortcut."
-            )
-        case .completed, .consumed, .failed:
-            break
+        try PrototypeMailbox.requestCapture(documentIdentifier: documentIdentifier)
+        refreshState(note: "Starting…")
+    }
+
+    private func startStatePolling() {
+        statePollingTask?.cancel()
+        statePollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.pollState()
+                try? await Task.sleep(for: .milliseconds(100))
+            }
         }
     }
 
-    private func consumeAndInsertIfAvailable() {
+    private func pollState() async {
+        let documentIdentifier = currentDocumentIdentifier
+        let pollingTask = Task.detached(priority: .utility) {
+            do {
+                return Result<PrototypeIPCSnapshot, PrototypeIPCError>.success(
+                    try PrototypeMailbox.keyboardSnapshot(
+                        documentIdentifier: documentIdentifier
+                    )
+                )
+            } catch let error as PrototypeIPCError {
+                return .failure(error)
+            } catch {
+                preconditionFailure("Unexpected keyboard IPC error: \(error)")
+            }
+        }
+        let result = await pollingTask.value
+        guard !Task.isCancelled else { return }
+
+        switch result {
+        case let .success(snapshot):
+            latestSnapshot = snapshot
+            if snapshot.mailbox?.state == .completed {
+                consumeAndInsertIfAvailable(snapshot: snapshot)
+            } else {
+                renderState(note: status(for: snapshot), snapshot: snapshot)
+            }
+        case let .failure(error):
+            renderIPCFailure(error)
+        }
+    }
+
+    private func consumeAndInsertIfAvailable(
+        snapshot: PrototypeIPCSnapshot? = nil
+    ) {
         guard hasFullAccess else {
             renderState(note: "Allow Full Access in Settings")
             return
         }
-        if let expectedDocument = PrototypeMailbox.current()?.documentIdentifier,
-           expectedDocument != textDocumentProxy.documentIdentifier {
-            renderState(note: "Return to the original field to insert")
-            return
-        }
-        guard let consumed = PrototypeMailbox.consumeCompleted() else {
-            renderState(note: statusForCurrentRecord())
-            return
-        }
+        do {
+            let currentRecord = try snapshot?.mailbox ?? PrototypeMailbox.current()
+            let destinationBeforeConsume = currentDocumentIdentifier
+            if let record = currentRecord,
+               !PrototypeDestinationIdentityFence.permitsInsertion(
+                   expected: record.documentIdentifier,
+                   beforeConsume: destinationBeforeConsume,
+                   afterConsume: destinationBeforeConsume
+               ) {
+                let currentSnapshot = try (
+                    snapshot
+                        ?? PrototypeMailbox.keyboardSnapshot(
+                            documentIdentifier: currentDocumentIdentifier
+                        )
+                )
+                renderState(
+                    note: "Return to the original text destination to insert",
+                    snapshot: currentSnapshot
+                )
+                return
+            }
+            guard let record = currentRecord,
+                  let consumed = try PrototypeMailbox.consumeCompleted(
+                      id: record.id,
+                      documentIdentifier: destinationBeforeConsume
+                  ) else {
+                refreshState()
+                return
+            }
 
-        textDocumentProxy.insertText(consumed.transcript)
-        PrototypeMailbox.markInserted(id: consumed.id)
-        renderState(note: "Transcript inserted")
+            guard PrototypeDestinationIdentityFence.permitsInsertion(
+                expected: consumed.documentIdentifier,
+                beforeConsume: destinationBeforeConsume,
+                afterConsume: currentDocumentIdentifier
+            ) else {
+                try PrototypeMailbox.discardConsumed(id: consumed.id)
+                refreshState(note: "Text destination changed • dictate again")
+                return
+            }
+
+            textDocumentProxy.insertText(consumed.transcript)
+            try PrototypeMailbox.markInserted(id: consumed.id)
+            refreshState(note: "Transcript inserted")
+        } catch {
+            if let ipcError = error as? PrototypeIPCError {
+                renderIPCFailure(ipcError)
+            } else {
+                assertionFailure("Unexpected keyboard IPC error: \(error)")
+            }
+        }
     }
 
-    private func statusForCurrentRecord() -> String {
-        guard let record = PrototypeMailbox.current() else {
-            return PrototypeWarmSession.current()?.isReady() == true
+    private func status(for snapshot: PrototypeIPCSnapshot) -> String {
+        let warmSessionReady = snapshot.warmSession?.isReady() == true
+        guard let record = snapshot.mailbox else {
+            return warmSessionReady
                 ? "Voice ready • tap Start Voice"
                 : "Hold the Action Button to Arm Hex"
         }
@@ -456,13 +524,14 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         case .captureRequested: "Starting • tap Stop to cancel"
         case .capturing: "Recording • tap Stop here"
         case .stopRequested: "Stopping recording…"
+        case .cancelRequested: "Cancelling voice entry…"
         case .processing: "Ronin is transcribing…"
         case .completed: "Transcript ready"
         case .consumed:
             if let insertedAt = record.insertedAt,
                Date().timeIntervalSince(insertedAt) < 2 {
                 "Transcript inserted"
-            } else if PrototypeWarmSession.current()?.isReady() == true {
+            } else if warmSessionReady {
                 "Voice ready • tap Start Voice"
             } else {
                 "Hold the Action Button to Arm Hex"
@@ -471,7 +540,22 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         }
     }
 
-    private func renderState(note: String) {
+    private func refreshState(note: String? = nil) {
+        do {
+            let snapshot = try PrototypeMailbox.keyboardSnapshot(
+                documentIdentifier: currentDocumentIdentifier
+            )
+            latestSnapshot = snapshot
+            renderState(note: note ?? status(for: snapshot), snapshot: snapshot)
+        } catch {
+            renderIPCFailure(error)
+        }
+    }
+
+    private func renderState(
+        note: String,
+        snapshot: PrototypeIPCSnapshot? = nil
+    ) {
         statusLabel.text = note
 
         guard hasFullAccess else {
@@ -481,32 +565,83 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             return
         }
 
-        let state = PrototypeMailbox.current()?.state
-        switch state {
+        let snapshot = snapshot ?? latestSnapshot
+        let record = snapshot?.mailbox
+        let warmSessionReady = snapshot?.warmSession?.isReady() == true
+        switch record?.state {
         case .captureRequested, .capturing:
             dictationButton.configuration?.image = UIImage(systemName: "stop.fill")
             dictationButton.configuration?.title = "Stop Voice"
             dictationButton.configuration?.baseBackgroundColor = .systemRed
             dictationButton.isEnabled = true
-        case .stopRequested, .processing:
+        case .stopRequested, .processing, .cancelRequested:
             dictationButton.configuration?.image = UIImage(systemName: "waveform")
             dictationButton.configuration?.title = "Sending…"
             dictationButton.configuration?.baseBackgroundColor = .systemBlue
             dictationButton.isEnabled = false
         case .completed:
-            dictationButton.configuration?.image = UIImage(systemName: "arrow.down.to.line")
-            dictationButton.configuration?.title = "Insert Transcript"
-            dictationButton.configuration?.baseBackgroundColor = .systemBlue
+            if let record, isCurrentTextDestination(for: record) {
+                dictationButton.configuration?.image = UIImage(systemName: "arrow.down.to.line")
+                dictationButton.configuration?.title = "Insert Transcript"
+                dictationButton.configuration?.baseBackgroundColor = .systemBlue
+            } else {
+                dictationButton.configuration?.image = UIImage(systemName: "trash")
+                dictationButton.configuration?.title = "Discard Pending"
+                dictationButton.configuration?.baseBackgroundColor = .systemOrange
+            }
             dictationButton.isEnabled = true
         case .consumed, .failed, nil:
             dictationButton.configuration?.image = UIImage(systemName: "mic.fill")
             dictationButton.configuration?.baseBackgroundColor = .systemBlue
-            if PrototypeWarmSession.current()?.isReady() == true {
+            if warmSessionReady {
                 dictationButton.configuration?.title = "Start Voice"
             } else {
                 dictationButton.configuration?.title = "Arm with Action Button"
             }
             dictationButton.isEnabled = true
         }
+    }
+
+    private func isCurrentTextDestination(for record: PrototypeMailboxRecord) -> Bool {
+        let currentDocument = currentDocumentIdentifier
+        return PrototypeDestinationIdentityFence.permitsInsertion(
+            expected: record.documentIdentifier,
+            beforeConsume: currentDocument,
+            afterConsume: currentDocument
+        )
+    }
+
+    /// Some host text inputs return no Objective-C document identifier even though
+    /// the Swift SDK imports this property as non-optional. Read it dynamically so
+    /// absence fails closed instead of manufacturing a wildcard destination.
+    private var currentDocumentIdentifier: UUID? {
+        (textDocumentProxy as? NSObject)?
+            .value(forKey: "documentIdentifier") as? UUID
+    }
+
+    private func requestCancellationForClosingKeyboard() {
+        guard hasFullAccess else { return }
+        do {
+            guard let record = try PrototypeMailbox.current() else { return }
+            switch record.state {
+            case .captureRequested, .capturing:
+                try PrototypeMailbox.requestCancel(id: record.id)
+            case .stopRequested, .cancelRequested, .processing,
+                 .completed, .consumed, .failed:
+                break
+            }
+        } catch {
+            HexLog.app.error("Keyboard close cancellation failed")
+        }
+    }
+
+    private func renderIPCFailure(_: PrototypeIPCError) {
+        latestSnapshot = nil
+        HexLog.app.error("Keyboard extension IPC failed")
+        statusLabel.text = "Hex keyboard state unavailable"
+        dictationButton.configuration?.image = UIImage(systemName: "exclamationmark.triangle.fill")
+        dictationButton.configuration?.title = "Reopen Hex"
+        dictationButton.configuration?.baseBackgroundColor = .systemOrange
+        dictationButton.isEnabled = false
     }
 }

@@ -170,7 +170,7 @@ The keyboard should treat the server as authoritative: if it cannot reach the Ta
 
 ### 2. Prototype the warm recorder
 
-Add an explicit **Arm keyboard dictation** action to Hex. In response to that foreground action, start an app-owned input graph under the `audio` background mode, discard samples until a keyboard request arrives, and publish an armed heartbeat in the App Group. While armed, let the keyboard write request-scoped start/stop commands and poll for the matching result so it can insert exactly once without leaving the host app.
+Add an explicit **Arm keyboard dictation** action to Hex. In response to that foreground action, start an app-owned input graph under the `audio` background mode, discard samples until a keyboard request arrives, and publish an armed heartbeat in the App Group. While armed, let the keyboard write request-scoped start/stop commands and poll for the matching result so it can make one at-most-once insertion attempt without leaving the host app.
 
 Make the privacy and lifecycle costs visible: keep the orange microphone indicator, start with a short timeout, expose a one-tap disarm action, and fall back to **Open Hex to arm dictation** after interruption, force-quit, or a stale heartbeat. The detailed call flow and device matrix live in [iOS background dictation architectures](ios-background-dictation-architectures.md).
 

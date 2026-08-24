@@ -2,9 +2,11 @@
 
 Research date: 2026-08-20
 
+> **Historical transport investigation.** The accepted and implemented iOS boundary does **not** give the keyboard a Device Credential or direct Ronin access. The containing app owns microphone capture, the credential, Tailscale HTTPS, and transcription; the keyboard exchanges bounded commands and the Final Transcript through the App Group and only inserts text. The keyboard-originated network path below records why an earlier alternative looked plausible, not the current architecture.
+
 ## Conclusion
 
-An iOS custom keyboard with **Allow Full Access** enabled should be able to make an HTTPS request to Ronin through an active Tailscale packet tunnel. Apple makes network access conditional on the keyboard declaring `RequestsOpenAccess = true` and the user enabling Allow Full Access. Tailscale describes its iOS Network Extension as securing traffic from all applications without application changes, while Apple documents that matching routes in a packet-tunnel configuration are sent through that tunnel. Together, those sources support the expected route:
+An iOS custom keyboard with **Allow Full Access** enabled should be able to make an HTTPS request to Ronin through an active Tailscale packet tunnel. Apple makes network access conditional on the keyboard declaring `RequestsOpenAccess = true` and the user enabling Allow Full Access. Tailscale describes its iOS Network Extension as securing traffic from all applications without application changes, while Apple documents that matching routes in a packet-tunnel configuration are sent through that tunnel. Together, those sources supported this *hypothetical alternative*:
 
 ```text
 keyboard extension URLSession
@@ -74,7 +76,7 @@ Tailscale authenticates a *node*, not the Hex keyboard process. Every network-ca
 Use two authorization layers:
 
 1. **Tailnet policy:** grant only the personal iPhone access to Ronin TCP 443. An exact phone Tailscale IP, preferably named by a `hosts` alias, can be a source selector. Ronin can likewise be a destination alias. Remove or narrow any broader rule that already permits the connection: Tailscale grants are additive, so a narrow grant does not override a broader one. [Tailscale: grants syntax and source selectors](https://tailscale.com/docs/reference/syntax/grants) [Tailscale: device visibility](https://tailscale.com/docs/concepts/device-visibility)
-2. **Application credential:** require a random, per-install credential on every API request. Provision it out of band during personal setup, never commit or log it, and store it in a Keychain access group shared by the containing app and keyboard extension. Apple documents that targets from the same development team can share Keychain items through a common access group, and that App Groups can also serve as Keychain access groups. [Apple: sharing Keychain items](https://developer.apple.com/documentation/security/sharing-access-to-keychain-items-among-a-collection-of-apps)
+2. **Application credential:** require a random, per-install credential on every API request. Provision it out of band during personal setup, never commit or log it, and store it only in the containing app's device-bound Keychain item. The keyboard neither reads the credential nor sends HTTP; it requests capture locally through the App Group. Apple documents Keychain as the platform secret store, but Keychain sharing is unnecessary for the accepted architecture. [Apple: Keychain Services](https://developer.apple.com/documentation/security/keychain-services/)
 
 For the first personal deployment, a 256-bit random bearer token over HTTPS is the simplest application credential. It protects the service from other tailnet nodes that are accidentally granted access and from unrelated apps on the same phone that do not possess the token.
 
@@ -93,7 +95,7 @@ HTTPS prevents passive observers from capturing a bearer token or request in tra
 Use this staged design:
 
 - **Initial personal version:** HTTPS + exact-iPhone tailnet grant + random bearer token. Add a client-generated request ID and make transcription submission idempotent for a short retention window so a timeout/retry cannot run the same Dictation twice. Never place credentials or Captured Audio in URLs or logs.
-- **If explicit cryptographic replay resistance becomes a requirement:** MAC each request using the shared Keychain secret. Cover the HTTP method, authority, path, body digest, creation/expiry timestamps, and a cryptographically random single-use nonce. Ronin must reject requests outside a narrow clock window and reject a nonce already seen within that window. RFC 9421 defines HTTP message signatures/MACs, `created`, `expires`, and `nonce`, and specifically identifies nonce uniqueness plus bounded signature age as replay controls. It also states that signatures do not replace TLS. [RFC 9421: HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421.html) [RFC 2104: HMAC](https://www.rfc-editor.org/info/rfc2104/)
+- **If explicit cryptographic replay resistance becomes a requirement:** the containing app could MAC each request using its device-bound credential. Cover the HTTP method, authority, path, body digest, creation/expiry timestamps, and a cryptographically random single-use nonce. Ronin must reject requests outside a narrow clock window and reject a nonce already seen within that window. RFC 9421 defines HTTP message signatures/MACs, `created`, `expires`, and `nonce`, and specifically identifies nonce uniqueness plus bounded signature age as replay controls. It also states that signatures do not replace TLS. [RFC 9421: HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421.html) [RFC 2104: HMAC](https://www.rfc-editor.org/info/rfc2104/)
 
 Do not invent the stronger signature scheme ad hoc during MVP implementation. Either implement a narrowly documented RFC 9421 profile with test vectors or keep the simpler bearer-token boundary and state that it does not provide application-layer replay proof.
 
@@ -119,9 +121,9 @@ Fail closed at both ends:
 
 If Tailscale is disabled, the private route is absent and the service has no non-tailnet listener, so the request cannot succeed. If the `*.ts.net` VPN On Demand rule brings Tailscale up first, success is still through Tailscale and satisfies this boundary. Another active VPN, a bad On Demand rule, Ronin being offline, a denied grant, or a failed certificate all produce the same fail-closed client outcome. [Tailscale: VPN On Demand behavior and limitations](https://tailscale.com/docs/features/client/ios-vpn-on-demand) [Tailscale: Serve is tailnet-only](https://tailscale.com/docs/features/tailscale-serve)
 
-## Required on-device prototype
+## Historical on-device transport probe
 
-The prototype is a transport probe, not a full dictation implementation. It must use the real personal iPhone, a keyboard-extension target, the current Tailscale iOS client, and a minimal HTTPS health endpoint on Ronin.
+This matrix belonged to the discarded direct-keyboard HTTP alternative. It remains useful evidence if that boundary is ever reconsidered, but it is not a current production gate. Current physical-device acceptance exercises containing-app upload plus App Group command/transcript delivery.
 
 | Condition | Expected result |
 | --- | --- |
@@ -139,4 +141,4 @@ For every successful request, record on Ronin whether the observed source maps t
 
 ## Decision for the Wayfinder map
 
-Proceed with Tailscale as the only network path, using Full Access, `URLSession`, Ronin's HTTPS MagicDNS FQDN, Tailscale Serve in front of a loopback-only service, an exact-iPhone tailnet grant, and a separate per-install application credential. Do not claim the keyboard-to-Tailscale route or VPN On Demand activation as resolved until the transport probe passes on the actual phone. Treat keyboard microphone access as impossible under Apple's documented custom-keyboard API and solve the Recording Session handoff in the iOS interaction architecture, not in this network layer.
+Proceed with Tailscale as the only network path from the **containing app**, using Ronin's HTTPS MagicDNS FQDN, Tailscale Serve in front of a loopback-only service, an exact-iPhone tailnet grant, and a separate per-install Device Credential held only by that app. The keyboard has no credential and no direct Ronin client; Full Access supports its App Group control/insertion boundary. Treat keyboard microphone access as impossible under Apple's documented custom-keyboard API and keep the Recording Session and network request in the containing app.

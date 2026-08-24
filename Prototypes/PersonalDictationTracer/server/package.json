@@ -7,16 +7,22 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx watch src/main.ts",
+    "dev:fake": "tsx watch src/main-fake.ts",
     "start": "node dist/main.js",
+    "start:fake": "node dist/main-fake.js",
+    "storage:drill": "tsx --test --test-name-pattern='online backup restores and replays|one manifest backs up and restores multiple|production registry backs up both live storage adapters' src/storage-administration.test.ts",
     "test": "tsx --test 'src/**/*.test.ts'",
     "validate": "npm run check && npm test && npm run build"
   },
   "dependencies": {
+    "@effect/opentelemetry": "0.64.0",
     "@effect/platform": "0.97.1",
     "@effect/platform-node": "0.108.1",
+    "better-sqlite3": "13.0.3",
     "effect": "3.22.1"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
     "@types/node": "24.10.1",
     "@types/ws": "8.18.1",
     "tsx": "4.20.6",

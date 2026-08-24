@@ -76,4 +76,3 @@ Two pieces remain unknown and should not be presented as established Wispr behav
 4. Add automatic return only where Hex has an explicit, tested destination URL. Do not imply this works for arbitrary apps.
 5. Preserve the current warm-session UX: after returning, **Start Voice** and **Stop Voice** must work in the keyboard without reopening Hex until the configured arm window expires.
 6. Re-run the exact physical-device handoff test after each iOS beta update. Wispr's own documentation shows that this behavior can vary by OS build, app, and rollout.
-

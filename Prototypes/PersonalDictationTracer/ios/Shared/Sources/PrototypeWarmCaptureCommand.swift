@@ -6,6 +6,7 @@ enum PrototypeWarmCaptureCommand {
         case start
         case stop
         case startThenStop
+        case cancel
     }
 
     static func nextAction(
@@ -20,6 +21,8 @@ enum PrototypeWarmCaptureCommand {
             .stop
         case .stopRequested where !isBusy:
             .startThenStop
+        case .cancelRequested:
+            .cancel
         default:
             .none
         }

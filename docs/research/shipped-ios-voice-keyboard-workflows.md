@@ -216,7 +216,7 @@ Apple's App Store keyboard rules are stricter than the personal-device requireme
 2. The user returns to the source app and selects Hex as the keyboard. The keyboard renders full QWERTY plus a prominent Dictate button and Globe escape.
 3. A Dictate tap writes a request ID into the App Group. It does not attempt to capture audio in the extension.
 4. The containing app owns capture, sends Captured Audio to Ronin over the authenticated Tailscale path, and writes the Final Transcript into the request record.
-5. While Hex is still the active keyboard, the extension consumes that exact request and calls `textDocumentProxy.insertText`. The request becomes consumed exactly once.
+5. While Hex is still the active keyboard, the extension atomically consumes that exact request and then calls `textDocumentProxy.insertText`. This produces the explicit at-most-once delivery tradeoff recorded in [ADR 0003](../adr/0003-ios-keyboard-delivery-is-at-most-once.md).
 6. The warm session has a short explicit timeout (start with 5 or 15 minutes), a Stop button, and a clear cold-start instruction. If Hex is killed, Full Access is missing, or Ronin is unavailable, the keyboard shows unavailable/pending and does not invent offline text.
 
 This gives the desired tap-to-speak experience without claiming that a keyboard extension can own the microphone. It deliberately accepts the yellow/orange microphone indicator and some battery cost. Test those costs rather than hiding them.

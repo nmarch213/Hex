@@ -2,6 +2,8 @@
 
 This document records the inherited Hex architecture at the fork point so future work can preserve its hard-won boundaries without treating every current limitation as a product requirement. Product language lives in [`CONTEXT.md`](../../CONTEXT.md).
 
+The accepted production direction is recorded separately in [`personal-cross-platform-target.md`](personal-cross-platform-target.md); this document remains the inherited baseline.
+
 ## Baseline
 
 The fork's `main` branch and `kitlangton/Hex` were identical at `881c46f236f529a8f6c7eed61ed1f4cbca9ac267` (`v0.8.4`) when this document was created. The repository contains a macOS application and tests; it has no server, iOS application, HTTP API, or Tailscale integration.
@@ -98,11 +100,11 @@ The current workflow also collapses Dictation origin and delivery onto one Mac. 
 
 Keep Tailscale reachability, application authentication, and HTTP transport outside speech-recognition semantics. Transport should authenticate and materialize a request before crossing the provider-neutral transcription boundary.
 
-## Selected settings ownership
+## Accepted target settings ownership
 
-Ronin is the canonical owner of one versioned Transcript Profile: the Selected Model, Word Removals, Word Remappings, spoken-punctuation rules, and Output Formatting. The service applies that profile and returns the Final Transcript; network clients do not reinterpret the Raw Transcript. Responses identify the applied profile revision so the result remains explainable when settings change.
+The accepted cross-device target makes Ronin the canonical owner of one versioned Transcript Profile: the Selected Model, Word Removals, Word Remappings, spoken-punctuation rules, and Output Formatting. Once the profile API exists, the service will apply that profile and return the Final Transcript; network clients will not reinterpret the Raw Transcript. Responses will identify the applied profile revision so the result remains explainable when settings change.
 
-The Mac and iPhone may both edit the profile. An edit includes the revision it was based on, and Ronin rejects stale revisions rather than silently overwriting a newer edit. The Mac caches the last accepted profile and may continue existing local Dictation with that revision while offline. The iPhone has no offline fallback: if it cannot reach Ronin and receive a Final Transcript, the Dictation fails closed.
+The Mac and iPhone will both be able to edit the profile. An edit includes the revision it was based on, and Ronin rejects stale revisions rather than silently overwriting a newer edit. The Mac caches the last accepted profile and may continue existing local Dictation with that revision while offline. The iPhone has no offline fallback: if it cannot reach Ronin and receive a Final Transcript, the Dictation fails closed.
 
 Device Interaction Settings remain local to each device. This includes Input Device selection, Recording Hotkeys, Recording Feedback, keyboard handoff, and operating-system interaction. They do not belong in the Transcript Profile merely because multiple clients expose them.
 

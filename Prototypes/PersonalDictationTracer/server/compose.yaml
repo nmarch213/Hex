@@ -1,25 +1,208 @@
+# Preserve the project identity used by deployments made before this file
+# declared an explicit name. Deploy and rotation must stop that same stack.
+name: server
+
+x-bounded-json-logging: &bounded-json-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   parakeet:
     image: ghcr.io/mudler/parakeet.cpp-server@sha256:4a5d92e41356cb5d691e3644d31cf4cc2c0be1536f165fff9f2c5ec852c29348
-    command: ["--model", "tdt-0.6b-v2", "--port", "8080"]
-    environment:
-      XDG_CACHE_HOME: /models
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        printf '%s  %s\n' \
+          'f8df7f5dc7b9ceb5cd0637a81194aab5d93022ace555ce81c8969c7a694b8f3d' \
+          '/models/tdt-0.6b-v2-f16.gguf' | sha256sum --check --status -
+        printf 'Pinned Parakeet model verified.\n'
+        exec parakeet-server \
+          --host 0.0.0.0 \
+          --model /models/tdt-0.6b-v2-f16.gguf \
+          --port 8080
+    user: "65532:65532"
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     expose:
       - "8080"
     volumes:
-      - parakeet-models:/models
-    restart: unless-stopped
+      - type: bind
+        source: ./models/tdt-0.6b-v2-f16.gguf
+        target: /models/tdt-0.6b-v2-f16.gguf
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - hex-internal
+    logging: *bounded-json-logging
+    # A native-process restart must rotate runtime/upstream-epoch. Only the
+    # verified deploy path proves the old process stopped and rotates that file.
+    restart: "no"
 
   hex-proxy:
-    build: .
+    build:
+      context: .
+      args:
+        HEX_BUILD_REVISION: ${HEX_BUILD_REVISION:-development}
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
     environment:
-      HEX_PROXY_TOKEN: ${HEX_PROXY_TOKEN:?set HEX_PROXY_TOKEN in server/.env}
+      HEX_LISTEN_HOST: 0.0.0.0
+      HEX_UPSTREAM_EPOCH_FILE: /run/hex/upstream-epoch
       HEX_UPSTREAM_URL: http://parakeet:8080/v1/audio/transcriptions
+      HEX_IDEMPOTENCY_DB_PATH: /var/lib/hex-personal-dictation/idempotency.sqlite
+      HEX_DEVICE_REGISTRY_DB_PATH: /var/lib/hex-personal-dictation/devices.sqlite
+      # Empty disables export. In production this should name an OTLP/HTTP
+      # collector reachable on hex-internal, normally http://otel-collector:4318.
+      HEX_OTLP_BASE_URL: ${HEX_OTLP_BASE_URL:-}
+    secrets:
+      - source: hex_health_probe_token
+        target: hex_health_probe_token
     depends_on:
       - parakeet
+    networks:
+      - hex-internal
     ports:
       - "127.0.0.1:8787:8787"
+    volumes:
+      - hex-proxy-data:/var/lib/hex-personal-dictation
+      - type: bind
+        source: ./runtime/upstream-epoch
+        target: /run/hex/upstream-epoch
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:fs').promises.readFile('/run/secrets/hex_health_probe_token','utf8').then(token=>fetch('http://127.0.0.1:8787/health',{headers:{authorization:'Bearer '+token.trimEnd()}})).then(response=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *bounded-json-logging
     restart: unless-stopped
 
+  device-admin:
+    profiles:
+      - device-admin
+    build:
+      context: .
+      args:
+        HEX_BUILD_REVISION: ${HEX_BUILD_REVISION:-development}
+    entrypoint:
+      - node
+      - dist/device-admin.js
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    environment:
+      HEX_DEVICE_REGISTRY_DB_PATH: /var/lib/hex-personal-dictation/devices.sqlite
+      HEX_HEALTH_PROBE_CREDENTIAL_FILE: /run/secrets/hex_health_probe_token
+    secrets:
+      - source: hex_health_probe_token
+        target: hex_health_probe_token
+    network_mode: none
+    volumes:
+      - hex-proxy-data:/var/lib/hex-personal-dictation
+    logging: *bounded-json-logging
+    restart: "no"
+
+  storage-backup:
+    profiles:
+      - storage-admin
+    build:
+      context: .
+      args:
+        HEX_BUILD_REVISION: ${HEX_BUILD_REVISION:-development}
+    entrypoint:
+      - node
+      - dist/storage-admin.js
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    environment:
+      HEX_STORAGE_REGISTRY_PATH: /app/storage-databases.json
+      HEX_STORAGE_DATA_DIRECTORY: /var/lib/hex-personal-dictation
+      HEX_STORAGE_BACKUP_DIRECTORY: /var/backups/hex-personal-dictation
+    network_mode: none
+    volumes:
+      - hex-proxy-data:/var/lib/hex-personal-dictation
+      - type: bind
+        source: ./backups
+        target: /var/backups/hex-personal-dictation
+        bind:
+          create_host_path: false
+    logging: *bounded-json-logging
+    restart: "no"
+
+  storage-restore:
+    profiles:
+      - storage-admin
+    build:
+      context: .
+      args:
+        HEX_BUILD_REVISION: ${HEX_BUILD_REVISION:-development}
+    entrypoint:
+      - node
+      - dist/storage-admin.js
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    environment:
+      HEX_STORAGE_REGISTRY_PATH: /app/storage-databases.json
+      HEX_STORAGE_DATA_DIRECTORY: /var/lib/hex-personal-dictation
+      HEX_STORAGE_BACKUP_DIRECTORY: /var/backups/hex-personal-dictation
+    network_mode: none
+    volumes:
+      - hex-proxy-data:/var/lib/hex-personal-dictation
+      - type: bind
+        source: ./backups
+        target: /var/backups/hex-personal-dictation
+        read_only: true
+        bind:
+          create_host_path: false
+    logging: *bounded-json-logging
+    restart: "no"
+
 volumes:
-  parakeet-models:
+  hex-proxy-data:
+
+secrets:
+  hex_health_probe_token:
+    file: ./secrets/health-probe-token
+
+networks:
+  hex-internal:
+    internal: true

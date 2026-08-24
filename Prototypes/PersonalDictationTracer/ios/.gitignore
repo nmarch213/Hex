@@ -1,5 +1,10 @@
-/.derivedData/
-/.deviceDerivedData/
-/.simDerivedData/
-/.signedDerivedData/
+/.derivedData*/
+/.mcpDerivedData*/
+/.releaseDerivedData*/
+/.deviceDerivedData*/
+/.simDerivedData*/
+/.testCompileDerivedData*/
+/.testDerivedData*/
+/.signedDerivedData*/
+/.signedTestDerivedData*/
 /HexKeyboardTracer.xcodeproj/

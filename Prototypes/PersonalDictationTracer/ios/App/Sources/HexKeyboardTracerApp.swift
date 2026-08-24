@@ -8,9 +8,6 @@ struct HexKeyboardTracerApp: App {
     var body: some Scene {
         WindowGroup {
             DictationTracerView(controller: controller)
-                .onOpenURL { url in
-                    controller.handleKeyboardLaunch(url)
-                }
                 .onReceive(intentRouter.$armRequestID.compactMap { $0 }) { requestID in
                     controller.handleArmShortcut()
                     intentRouter.consumeArmRequest(id: requestID)
@@ -27,18 +24,18 @@ private struct DictationTracerView: View {
         NavigationStack {
             Form {
                 Section("Dictation") {
-                    Text(controller.status)
+                    Text(controller.state.status)
                         .font(.callout)
 
                     Button(primaryButtonTitle) {
                         controller.toggleRecording()
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(controller.isRecording ? .red : .accentColor)
-                    .disabled(controller.isBusy && !controller.isRecording)
+                    .tint(controller.state.isRecording ? .red : .accentColor)
+                    .disabled(controller.state.isBusy && !controller.state.isRecording)
 
                     Text(
-                        controller.isArmed
+                        controller.state.isArmed
                             ? "Swipe back to the app where you want to type. In the Hex keyboard, tap Start Voice, speak, then tap Stop Voice. Keep Hex armed while you dictate; iOS shows the orange microphone indicator."
                             : "Run the Arm Hex shortcut—ideally from the Action Button—then swipe back. The keyboard can start and stop voice entry without leaving your text field."
                     )
@@ -47,11 +44,11 @@ private struct DictationTracerView: View {
 
                     LabeledContent(
                         "Keyboard voice",
-                        value: controller.isArmed ? "Armed" : "Off"
+                        value: controller.state.isArmed ? "Armed" : "Off"
                     )
-                    if let session = controller.warmSessionRecord,
+                    if let session = controller.state.warmSessionRecord,
                        session.state == .armed,
-                       controller.isArmed {
+                       controller.state.isArmed {
                         LabeledContent(
                             "Armed until",
                             value: session.expiresAt.formatted(date: .omitted, time: .shortened)
@@ -60,43 +57,46 @@ private struct DictationTracerView: View {
                 }
 
                 Section("Private server") {
-                    LabeledContent("Origin", value: controller.serverURLString)
+                    LabeledContent("Origin", value: controller.state.serverURLString)
                     LabeledContent(
                         "Credential",
-                        value: controller.token.isEmpty ? "Missing" : "Stored"
+                        value: controller.state.credentialStatus
                     )
-                    SecureField("Bearer token", text: $controller.token)
+                    SecureField("Device Credential", text: tokenBinding)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Text("The prototype pins Ronin as its only origin and stores the token in this device's Keychain. Rotate it after testing.")
+                    Button("Save Credential") {
+                        controller.saveCredential()
+                    }
+                    Text("The prototype pins Ronin as its only origin and stores the Device Credential in this device's Keychain. Rotate it after testing.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("Hex transcript transforms") {
-                    Toggle("Remove filler words", isOn: $controller.removeFillerWords)
-                    Toggle("Spoken punctuation", isOn: $controller.spokenPunctuation)
-                    Toggle("Lowercase", isOn: $controller.lowercase)
-                    Toggle("Remove punctuation", isOn: $controller.removePunctuation)
+                    Toggle("Remove filler words", isOn: preferenceBinding(\.removeFillerWords))
+                    Toggle("Spoken punctuation", isOn: preferenceBinding(\.spokenPunctuation))
+                    Toggle("Lowercase", isOn: preferenceBinding(\.lowercase))
+                    Toggle("Remove punctuation", isOn: preferenceBinding(\.removePunctuation))
                 }
 
-                Section("Mailbox seam") {
+                #if DEBUG
+                Section("Mailbox diagnostics") {
                     TextEditor(text: $seededTranscript)
                         .frame(minHeight: 80)
                     Button("Seed Final Transcript") {
-                        PrototypeMailbox.seedCompleted(transcript: seededTranscript)
-                        controller.refreshMailbox()
+                        controller.seedMailbox(transcript: seededTranscript)
                     }
-                    .disabled(seededTranscript.isEmpty || controller.isBusy)
+                    .disabled(seededTranscript.isEmpty || controller.state.isBusy)
                     Button("Clear Mailbox", role: .destructive) {
-                        PrototypeMailbox.clear()
-                        controller.refreshMailbox()
+                        controller.clearMailbox()
                     }
-                    .disabled(controller.isBusy)
+                    .disabled(controller.state.isBusy)
                 }
+                #endif
 
                 Section("Full request state") {
-                    if let record = controller.mailboxRecord {
+                    if let record = controller.state.mailboxRecord {
                         LabeledContent("Request", value: record.id.uuidString)
                         LabeledContent("State", value: record.state.rawValue)
                         LabeledContent(
@@ -110,19 +110,13 @@ private struct DictationTracerView: View {
                             LabeledContent("Parakeet", value: "\(upstream) ms")
                         }
                         if let service = record.serviceMilliseconds {
-                            LabeledContent("Service total", value: "\(service) ms")
+                            LabeledContent("Service before commit", value: "\(service) ms")
                         }
                         if let insertion = record.stopToInsertionMilliseconds {
                             LabeledContent("Stop to insertion", value: "\(insertion) ms")
                         }
                         if let returnToInsertion = record.returnToInsertionMilliseconds {
                             LabeledContent("Return to insertion", value: "\(returnToInsertion) ms")
-                        }
-                        if !record.rawTranscript.isEmpty {
-                            LabeledContent("Raw", value: record.rawTranscript)
-                        }
-                        if !record.transcript.isEmpty {
-                            LabeledContent("Final", value: record.transcript)
                         }
                         if let errorMessage = record.errorMessage {
                             Text(errorMessage)
@@ -137,9 +131,17 @@ private struct DictationTracerView: View {
                 Section("App Group") {
                     Text(PrototypeMailbox.appGroupID)
                         .font(.caption.monospaced())
+                    if controller.state.hasIPCFailure {
+                        Button("Reset Keyboard State", role: .destructive) {
+                            controller.resetKeyboardState()
+                        }
+                        Text("Reset removes an unusable pending request and disarms microphone capture. It does not change the saved Ronin credential.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
-            .navigationTitle("Hex Dictation Tracer")
+            .navigationTitle("Hex")
             .toolbar {
                 Button("Refresh") {
                     controller.refreshMailbox()
@@ -152,12 +154,32 @@ private struct DictationTracerView: View {
     }
 
     private var primaryButtonTitle: String {
-        if controller.isRecording {
+        if controller.state.isRecording {
             return "Stop & Transcribe"
         }
-        if controller.isArmed {
+        if controller.state.isArmed {
             return "Disarm Keyboard Dictation"
         }
         return "Arm & Swipe Back"
+    }
+
+    private var tokenBinding: Binding<String> {
+        Binding(
+            get: { controller.state.token },
+            set: { token in controller.setToken(token) }
+        )
+    }
+
+    private func preferenceBinding(
+        _ keyPath: WritableKeyPath<PrototypeDictationPreferences, Bool>
+    ) -> Binding<Bool> {
+        Binding(
+            get: { controller.state.transcriptPreferences[keyPath: keyPath] },
+            set: { value in
+                var preferences = controller.state.transcriptPreferences
+                preferences[keyPath: keyPath] = value
+                controller.setTranscriptPreferences(preferences)
+            }
+        )
     }
 }

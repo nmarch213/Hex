@@ -2,6 +2,24 @@
 
 Hex turns spoken input into text intended for insertion at a text destination. The domain distinguishes the user's complete dictation from audio capture, speech recognition, transcript processing, delivery, and optional history.
 
+## Personal topology
+
+**Owner**:
+The one person whose private Hex environment contains its devices, transcript policy, and aggregate statistics; an Owner is not a login account.
+_Avoid_: User, account, tenant
+
+**Ronin**:
+The Owner-controlled private host that provides canonical cross-device Hex capabilities.
+_Avoid_: Cloud, account server
+
+**Device Principal**:
+An independently authenticated and revocable Hex installation acting for the Owner.
+_Avoid_: User, session, device account
+
+**Device Credential**:
+The secret held by one Device Principal to prove its authority to Ronin.
+_Avoid_: Shared token, Owner password
+
 ## Dictation
 
 **Dictation**:
@@ -98,6 +116,10 @@ _Avoid_: Input language
 The versioned collection of transcript policy shared across Hex clients, including the Selected Model, Transcript Transforms, and Output Formatting.
 _Avoid_: Shared settings, device settings
 
+**Transcript Profile Revision**:
+An immutable accepted version of the Transcript Profile used consistently for one Dictation.
+_Avoid_: Settings timestamp, device version
+
 **Raw Transcript**:
 The text produced directly by Transcription before user-defined transforms.
 _Avoid_: Transcript, result
@@ -105,6 +127,14 @@ _Avoid_: Transcript, result
 **Transcript Transform**:
 A deterministic rule that modifies a Raw Transcript before delivery or storage.
 _Avoid_: Mode, transformation
+
+**Transcript Style**:
+A named policy for the tone of a Final Transcript; the supported styles are normal, casual, and professional.
+_Avoid_: Mode, prompt, Output Formatting
+
+**Transcript Rewriter**:
+An optional policy-constrained process that proposes styled text without becoming a Transcript Transform.
+_Avoid_: Transcript Transform, arbitrary prompt
 
 **Word Removal**:
 A Transcript Transform that removes matching words or phrases.
@@ -151,6 +181,14 @@ _Avoid_: Last history entry
 **Paste Last Transcript**:
 The action that delivers the Last Transcript again without making a new Recording Session.
 _Avoid_: Copy last transcript
+
+**Dictation Outcome**:
+The terminal classification and bounded measurements for one Dictation, excluding audio and transcript content.
+_Avoid_: History Entry, request log
+
+**Dictation Statistics**:
+Aggregate numeric summaries derived from Dictation Outcomes.
+_Avoid_: Transcription History, activity log, analytics events
 
 ## Environment
 
