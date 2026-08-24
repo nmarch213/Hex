@@ -206,7 +206,7 @@ jobs:
             sleep 1
           done
           jq --exit-status \
-            'to_entries | length == 11 and all(.value; type == "array")' \
+            'to_entries | length == 11 and all(.[]; (.value | type) == "array")' \
             latency-report.json >/dev/null
           rm latency-report.json
           cleanup_monitoring
