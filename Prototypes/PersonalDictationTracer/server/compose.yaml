@@ -165,6 +165,9 @@ services:
           create_host_path: false
     networks:
       - hex-internal
+      # Docker does not route a published host port from an internal-only
+      # network. This bridge exists only for the loopback-bound query API.
+      - hex-monitoring-loopback
     healthcheck:
       test:
         - CMD
@@ -290,3 +293,4 @@ secrets:
 networks:
   hex-internal:
     internal: true
+  hex-monitoring-loopback:
