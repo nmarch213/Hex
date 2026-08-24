@@ -494,10 +494,19 @@ actor DictationCapture {
             // keeps input available in the background, `mixWithOthers` preserves existing
             // playback, HFP permits a selected Bluetooth microphone, and speaker routing
             // prevents this input-only app from unexpectedly selecting the receiver.
+            var categoryOptions: AVAudioSession.CategoryOptions = [
+                .mixWithOthers,
+                .defaultToSpeaker
+            ]
+#if compiler(>=6.2)
+            categoryOptions.insert(.allowBluetoothHFP)
+#else
+            categoryOptions.insert(.allowBluetooth)
+#endif
             try session.setCategory(
                 .playAndRecord,
                 mode: .measurement,
-                options: [.mixWithOthers, .allowBluetoothHFP, .defaultToSpeaker]
+                options: categoryOptions
             )
             try session.setPreferredSampleRate(Self.canonicalSampleRate)
             try session.setPreferredIOBufferDuration(0.01)
