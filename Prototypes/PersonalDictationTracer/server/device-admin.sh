@@ -93,6 +93,8 @@ write_new_credential() (
   # The EXIT trap below invokes this cleanup function.
   # shellcheck disable=SC2329
   cleanup_credential_output() {
+    # Invoked indirectly by the EXIT trap registered below.
+    # shellcheck disable=SC2317
     rm -f "$temporary_credential" "$temporary_status" "$temporary_device_id"
   }
   trap cleanup_credential_output EXIT
