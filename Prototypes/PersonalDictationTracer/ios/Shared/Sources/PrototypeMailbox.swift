@@ -7,7 +7,7 @@ enum PrototypeIPCFile: String, Equatable, Sendable {
     case warmSession
     case lock
 
-    fileprivate var filename: String {
+    var filename: String {
         switch self {
         case .mailboxRecord:
             "prototype.final-transcript.json"
@@ -283,6 +283,30 @@ enum PrototypeIPCStore {
                 code: (error as NSError).code
             )
         }
+#if os(iOS)
+        var metadataURL = url
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        do {
+            try metadataURL.setResourceValues(resourceValues)
+        } catch {
+            let metadataError = error as NSError
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                throw .ioFailure(
+                    operation: "rollback_backup_exclusion",
+                    file: file,
+                    code: (error as NSError).code
+                )
+            }
+            throw .ioFailure(
+                operation: "exclude_from_backup",
+                file: file,
+                code: metadataError.code
+            )
+        }
+#endif
     }
 
     static func remove(

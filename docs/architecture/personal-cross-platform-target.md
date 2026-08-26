@@ -2,6 +2,8 @@
 
 This document is the production handoff for the accepted personal Hex topology. Product language lives in [`CONTEXT.md`](../../CONTEXT.md), inherited preservation rules remain in [`current-system.md`](current-system.md), and the supporting research remains in [`single-owner-cross-platform-hex.md`](../research/single-owner-cross-platform-hex.md).
 
+For an end-to-end visual tour of the implemented slice, hosting and storage boundaries, telemetry, and roadmap, open [`personal-dictation-map.html`](personal-dictation-map.html).
+
 ## Status and scope
 
 This is the target architecture, not a description of the current prototypes. It accepts one Owner, independently revocable Device Principals, Ronin-owned transcript policy, a remote-only first Windows client, privacy-safe Dictation Statistics, and three Transcript Styles.
@@ -214,7 +216,7 @@ HTTP bytes and headers
 
 The exact placement of the Transcript Rewriter among deterministic stages is unresolved and requires fixtures before implementation. Normal must remain byte-compatible with the inherited deterministic pipeline regardless of that decision.
 
-Cancellation stops queued or active work where the Parakeet runtime permits it and never commits a completed outcome. A retry with the same Dictation ID and digest observes the same durable state; a retry with a different digest is rejected. Logs carry Dictation ID, Device Principal ID, bounded stage/outcome, revisions, model/runtime identifiers, and timings with privacy annotations, never content or credentials.
+Client cancellation immediately resets local capture, mailbox, and UI state and stops waiting for the remote result. Once Ronin has admitted inference, a disconnected or cancelled waiter does not prove that Parakeet stopped; the service-owned worker may therefore finish and commit the result so a retry with the same Dictation ID and digest observes one durable outcome. A retry with a different digest is rejected. Logs and spans carry only bounded stage/outcome, revisions, model/runtime identifiers, and timings—never request or device identifiers, content, credentials, paths, addresses, or arbitrary error data.
 
 ## Windows first release
 

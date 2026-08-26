@@ -65,6 +65,7 @@ const otlpBaseURL = Config.string("HEX_OTLP_BASE_URL").pipe(
   )
 )
 
+/** Reports an unreadable or invalid Parakeet process-epoch configuration. */
 export class UpstreamEpochConfigurationError extends Schema.TaggedError<UpstreamEpochConfigurationError>()(
   "UpstreamEpochConfigurationError",
   { reason: Schema.Literal("unreadable", "invalid") }

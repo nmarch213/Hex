@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Hex Personal Dictation — System Map</title>
+  <style>
+    :root {
+      --ink: #f3f0e8;
+      --muted: #aaa69d;
+      --paper: #111310;
+      --panel: #191c18;
+      --line: #363b34;
+      --green: #a8e063;
+      --green-dark: #24381a;
+      --blue: #8ac8ff;
+      --blue-dark: #172b3c;
+      --amber: #ffd27d;
+      --amber-dark: #3b2d15;
+      --rose: #ffaaa5;
+      --rose-dark: #40201e;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 88% 4%, rgba(168,224,99,.11), transparent 28rem),
+        radial-gradient(circle at 3% 30%, rgba(138,200,255,.08), transparent 30rem),
+        var(--paper);
+      font: 15px/1.55 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code { color: #d7f7ae; font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
+    header { padding: 72px 0 36px; }
+    .eyebrow { color: var(--green); font-size: 12px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { max-width: 850px; margin: 12px 0 18px; font-size: clamp(40px, 7vw, 78px); line-height: .98; letter-spacing: -.055em; }
+    .lede { max-width: 800px; margin: 0; color: #cbc8bf; font-size: 19px; }
+    .stamp { display: inline-flex; gap: 8px; margin-top: 24px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; }
+    nav { position: sticky; top: 0; z-index: 4; overflow-x: auto; border-block: 1px solid var(--line); background: rgba(17,19,16,.92); backdrop-filter: blur(16px); }
+    nav .shell { display: flex; gap: 20px; padding-block: 12px; white-space: nowrap; }
+    nav a { color: var(--muted); font-size: 13px; font-weight: 700; text-decoration: none; }
+    nav a:hover { color: var(--ink); }
+    section { padding: 56px 0; border-bottom: 1px solid var(--line); }
+    h2 { margin: 0 0 10px; font-size: clamp(28px, 4vw, 44px); line-height: 1.1; letter-spacing: -.035em; }
+    h3 { margin: 0 0 7px; font-size: 17px; }
+    .intro { max-width: 760px; margin: 0 0 28px; color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+    .card { grid-column: span 4; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: linear-gradient(145deg, rgba(255,255,255,.025), transparent), var(--panel); }
+    .card.wide { grid-column: span 6; }
+    .card.full { grid-column: 1 / -1; }
+    .card p { margin: 0; color: var(--muted); }
+    .tag { display: inline-block; margin-bottom: 12px; padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .built { color: var(--green); background: var(--green-dark); }
+    .next { color: var(--amber); background: var(--amber-dark); }
+    .boundary { color: var(--blue); background: var(--blue-dark); }
+    .risk { color: var(--rose); background: var(--rose-dark); }
+    .flow { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 26px; align-items: stretch; overflow-x: auto; padding: 10px 2px 18px; }
+    .node { position: relative; min-width: 150px; padding: 17px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+    .node:not(:last-child)::after { content: "→"; position: absolute; right: -22px; top: calc(50% - 13px); color: var(--green); font-size: 22px; }
+    .node strong { display: block; margin-bottom: 5px; }
+    .node small { display: block; color: var(--muted); line-height: 1.4; }
+    .node.phone { border-top: 3px solid var(--blue); }
+    .node.network { border-top: 3px solid var(--amber); }
+    .node.server { border-top: 3px solid var(--green); }
+    .sequence { counter-reset: steps; display: grid; gap: 10px; }
+    .step { display: grid; grid-template-columns: 38px 170px 1fr; gap: 12px; align-items: baseline; padding: 13px 15px; border-left: 1px solid var(--line); background: rgba(255,255,255,.018); }
+    .step::before { counter-increment: steps; content: counter(steps); color: var(--green); font-weight: 800; }
+    .step b { color: #dedbd3; }
+    .step span { color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 13px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
+    td:first-child { color: var(--ink); font-weight: 700; }
+    .stack { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+    .layer { padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+    .layer ol, .layer ul { margin: 10px 0 0; padding-left: 20px; color: var(--muted); }
+    .layer li + li { margin-top: 7px; }
+    .rule { margin-top: 16px; padding: 14px 16px; border-left: 3px solid var(--green); background: var(--green-dark); color: #dff7c1; }
+    .metrics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .metric { padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .roadmap { display: grid; gap: 1px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--line); }
+    .road { display: grid; grid-template-columns: 90px 1fr 1fr; gap: 18px; padding: 18px; background: var(--panel); }
+    .road > strong { color: var(--amber); }
+    .road p { margin: 0; color: var(--muted); }
+    footer { padding: 40px 0 70px; color: var(--muted); }
+    @media (max-width: 850px) {
+      .card, .card.wide { grid-column: 1 / -1; }
+      .stack { grid-template-columns: 1fr; }
+      .step { grid-template-columns: 30px 1fr; }
+      .step span { grid-column: 2; }
+      .road { grid-template-columns: 1fr; gap: 5px; }
+    }
+    @media print {
+      :root { --ink: #111; --muted: #4b4b4b; --paper: #fff; --panel: #fff; --line: #ccc; }
+      body { background: #fff; }
+      nav { display: none; }
+      section { break-inside: avoid; }
+      .node:not(:last-child)::after { color: #333; }
+    }
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <div class="eyebrow">Hex · personal infrastructure</div>
+    <h1>Voice from the iPhone to any cursor.</h1>
+    <p class="lede">A system map of the private iOS keyboard, the Ronin Effect service, Parakeet inference, durable state, and performance telemetry—plus an honest boundary between what exists now and what comes next.</p>
+    <div class="stamp"><span>Architecture snapshot</span><span>•</span><span>26 Aug 2026</span></div>
+  </header>
+
+  <nav aria-label="Page sections"><div class="shell">
+    <a href="#overview">Overview</a><a href="#journey">Request journey</a><a href="#layers">Layers</a><a href="#storage">Hosting &amp; storage</a><a href="#telemetry">Telemetry</a><a href="#safety">Safety</a><a href="#roadmap">Next</a>
+  </div></nav>
+
+  <main>
+    <section id="overview"><div class="shell">
+      <span class="tag built">Working vertical slice</span>
+      <h2>One owner. Two trusted machines. Four boundaries.</h2>
+      <p class="intro">The iPhone handles the interaction that only iOS can perform. Ronin handles the policy and compute that should be shared. Tailscale provides private reachability; an independent Device Credential provides application authentication.</p>
+      <div class="flow" role="img" aria-label="Architecture flow from keyboard to Ronin and back">
+        <div class="node phone"><strong>Hex keyboard</strong><small>Start, stop, cancel, ordinary typing, and final cursor insertion.</small></div>
+        <div class="node phone"><strong>Hex iOS app</strong><small>Warm microphone, bounded WAV capture, workflow, and HTTPS upload.</small></div>
+        <div class="node network"><strong>Tailscale Serve</strong><small>Tailnet-only HTTPS to Ronin loopback. Funnel stays off.</small></div>
+        <div class="node server"><strong>Effect proxy</strong><small>Auth, validation, admission, durable idempotency, and telemetry.</small></div>
+        <div class="node server"><strong>Parakeet v2</strong><small>Pinned F16 model and runtime produce the raw English transcript.</small></div>
+      </div>
+      <div class="grid">
+        <article class="card"><span class="tag boundary">iPhone authority</span><h3>Interaction and delivery</h3><p>Activation, recording feedback, audio capture, cancellation, and insertion into the active text destination.</p></article>
+        <article class="card"><span class="tag boundary">Ronin authority</span><h3>Remote dictation</h3><p>Device authentication, inference serialization, request replay, operational storage, and the future canonical transcript profile.</p></article>
+        <article class="card"><span class="tag boundary">Privacy rule</span><h3>No retained audio</h3><p>Idle buffers are discarded. Per-dictation WAV files are transient. Telemetry contains shape and timing—not speech or transcript content.</p></article>
+      </div>
+    </div></section>
+
+    <section id="journey"><div class="shell">
+      <h2>One dictation, end to end</h2>
+      <p class="intro">The control path crosses process boundaries twice on iOS because Apple does not give a third-party keyboard microphone access.</p>
+      <div class="sequence">
+        <div class="step"><b>Arm</b><span>The Action Button runs the <code>Arm Hex</code> App Intent. The containing app enters a time-bounded warm session and discards idle microphone buffers.</span></div>
+        <div class="step"><b>Request</b><span>The custom keyboard writes a Begin command, request ID, text-document identity, and presence heartbeat into the transactional App Group mailbox.</span></div>
+        <div class="step"><b>Capture</b><span>The app accepts Begin, opens a private WAV, and routes preallocated real-time tap buffers through a bounded single-producer/single-consumer ring to file I/O off the audio thread.</span></div>
+        <div class="step"><b>Stop or cancel</b><span>Stop seals the WAV; Cancel erases the partial artifact and resets the whole request. A stale keyboard heartbeat, disarm, expiry, or capture failure also fails closed.</span></div>
+        <div class="step"><b>Upload</b><span>The app sends the WAV, Device Credential, and caller-generated request ID over tailnet HTTPS to Ronin. There is no offline queue or silent local fallback.</span></div>
+        <div class="step"><b>Authenticate</b><span>The HTTP adapter validates the bounded request and resolves a SHA-256 credential digest to an active, capability-scoped Device Principal.</span></div>
+        <div class="step"><b>Deduplicate</b><span>The application module claims the request ID in SQLite. A same-audio retry replays its durable result; different audio under the same ID is a conflict.</span></div>
+        <div class="step"><b>Transcribe</b><span>A single fail-fast inference lease protects Parakeet. The pinned runtime/model returns text; the service commits the response before returning it.</span></div>
+        <div class="step"><b>Deliver</b><span>The app deletes the WAV and publishes the Final Transcript to the App Group mailbox. The keyboard verifies the original document, consumes the transcript, then calls <code>insertText</code>.</span></div>
+        <div class="step"><b>Repeat</b><span>The warm session remains armed, so the same keyboard can begin another independent request without reopening Hex.</span></div>
+      </div>
+    </div></section>
+
+    <section id="layers"><div class="shell">
+      <h2>Modules and seams</h2>
+      <p class="intro">The design keeps platform and storage details at adapters. Workflow code depends on narrow, domain-shaped interfaces so lifecycle, replay, and failure policy stay testable.</p>
+      <div class="stack">
+        <article class="layer"><span class="tag boundary">iOS presentation</span><h3>Views and system surfaces</h3><ul><li>SwiftUI containing app</li><li>App Intent / Action Button</li><li>Custom keyboard controller</li><li>Recording and latency feedback</li></ul></article>
+        <article class="layer"><span class="tag boundary">iOS application</span><h3>Dictation workflow</h3><ul><li>Explicit state machine and update fence</li><li>Arm / begin / finish / cancel policy</li><li>Transcript pipeline orchestration</li><li>Lifecycle and heartbeat reconciliation</li></ul></article>
+        <article class="layer"><span class="tag boundary">iOS adapters</span><h3>Platform ownership</h3><ul><li>AVAudioEngine capture</li><li>App Group transactional mailbox</li><li>Keychain credential store</li><li>URLSession Ronin client</li><li>Transient audio storage</li></ul></article>
+        <article class="layer"><span class="tag boundary">Server transport</span><h3>Untrusted HTTP edge</h3><ul><li>Known routes and bounded bodies</li><li>WAV parsing and audio admission</li><li>Authentication projection</li><li>Stable JSON responses and errors</li></ul></article>
+        <article class="layer"><span class="tag boundary">Effect application</span><h3>Dictation authority</h3><ul><li><code>DeviceAuthentication</code></li><li><code>TranscriptionIdempotency</code></li><li><code>SpeechRecognition</code> port</li><li><code>Transcription</code> orchestration</li></ul></article>
+        <article class="layer"><span class="tag boundary">Server adapters</span><h3>External mechanisms</h3><ul><li>SQLite device registry</li><li>SQLite request ledger</li><li>Parakeet HTTP adapter</li><li>Effect OTLP exporter</li><li>Backup / restore administration</li></ul></article>
+      </div>
+      <div class="rule"><strong>Composition roots:</strong> iOS live dependencies are assembled at the app controller boundary. Ronin selects production SQLite, Parakeet, HTTP, configuration, and telemetry Layers only in <code>src/main.ts</code>; tests substitute fakes or temporary SQLite through the same interfaces.</div>
+    </div></section>
+
+    <section id="storage"><div class="shell">
+      <h2>What runs and what persists where</h2>
+      <p class="intro">Storage is deliberately small and explicit. Content retention exists only where durable retry requires it.</p>
+      <div class="card full" style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Place</th><th>Runs there</th><th>Stored there</th><th>Lifetime / protection</th></tr></thead>
+          <tbody>
+            <tr><td>iPhone · Keychain</td><td>Credential adapter</td><td>One device-specific 256-bit Device Credential</td><td>Device-only Keychain protection; never copied into the keyboard App Group.</td></tr>
+            <tr><td>iPhone · app preferences</td><td>Containing app UI</td><td>Local interaction settings and current prototype transcript transforms</td><td>Local only. These settings are not synchronized yet.</td></tr>
+            <tr><td>iPhone · App Group</td><td>App ↔ keyboard IPC</td><td>Bounded command, heartbeat, warm-session state, and one pending Final Transcript</td><td>Transactional file lock, complete file protection, excluded from backup; transcript expires after 15 minutes.</td></tr>
+            <tr><td>iPhone · private app storage</td><td>Capture writer</td><td>One transient per-request WAV</td><td>Excluded from backup and erased after upload, cancellation, failure, disarm, or next-launch orphan cleanup.</td></tr>
+            <tr><td>Ronin · private Docker volume</td><td>Effect proxy</td><td><code>devices.sqlite</code> and <code>idempotency.sqlite</code></td><td>Credential digests plus at most 256 completed transcript responses, expiring after 24 hours. No audio.</td></tr>
+            <tr><td>Ronin · model mount</td><td>Parakeet container</td><td>Checksum- and revision-pinned F16 Parakeet v2 GGUF</td><td>Read-only in the container; verified before deploy.</td></tr>
+            <tr><td>Ronin · Prometheus volume</td><td>Collector + Prometheus</td><td>Bounded latency and health time series</td><td>14 days or 2 GB. Prometheus binds to Ronin loopback only.</td></tr>
+            <tr><td>Ronin · container logs</td><td>Effect JSON logger</td><td>Bounded, content-free completion events</td><td>Operational log retention. The default Collector discards exported traces and logs after acceptance.</td></tr>
+            <tr><td>Ronin · backup directory</td><td>Offline storage administration</td><td>Content-addressed, manifest-bound copies of registered SQLite databases</td><td>Owner-only, schema-verified, sensitive because durable responses contain transcripts. Never contains audio.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid" style="margin-top:14px">
+        <article class="card wide"><span class="tag built">Hosted now</span><h3>Private Ronin stack</h3><p>Four pinned containers: Parakeet, the Effect proxy, OpenTelemetry Collector, and Prometheus. The proxy publishes only to <code>127.0.0.1:8787</code>; Tailscale Serve supplies private HTTPS. The Parakeet port and Collector stay internal.</p></article>
+        <article class="card wide"><span class="tag next">Not hosted yet</span><h3>Shared profile and clients</h3><p>Ronin does not yet host the canonical versioned Transcript Profile, statistics aggregates, or style rewriter. A Windows client and Ronin-backed macOS client are designed but not implemented.</p></article>
+      </div>
+    </div></section>
+
+    <section id="telemetry"><div class="shell">
+      <span class="tag built">Effect + OpenTelemetry</span>
+      <h2>Latency is a first-class product signal</h2>
+      <p class="intro">The server records deeply nested, content-free spans across the real Effect call stack. Metrics separate workload shape from processing speed so longer recordings do not masquerade as regressions.</p>
+      <div class="flow" style="grid-template-columns:repeat(6,minmax(135px,1fr))">
+        <div class="node server"><strong>HTTP</strong><small>Known route, total duration, outcome.</small></div>
+        <div class="node server"><strong>Auth</strong><small>Credential parse and principal resolution.</small></div>
+        <div class="node server"><strong>Audio</strong><small>Body read, WAV parse, digest, duration class.</small></div>
+        <div class="node server"><strong>Ledger</strong><small>Claim, replay, conflict, inference lease.</small></div>
+        <div class="node server"><strong>Parakeet</strong><small>Prepare, upstream, decode, real-time factor.</small></div>
+        <div class="node server"><strong>Commit</strong><small>Durable result, cleanup, response.</small></div>
+      </div>
+      <div class="metrics"><span class="metric">hex_http_server_duration_ms</span><span class="metric">hex_dictation_stage_duration_ms</span><span class="metric">hex_dictation_service_duration_ms</span><span class="metric">hex_dictation_recognition_realtime_factor</span></div>
+      <div class="grid" style="margin-top:18px">
+        <article class="card"><h3>Measured</h3><p>p50/p95/p99 by bounded recording-length bucket, service p95, stage quantiles, recognition real-time factor, request volume, exporter and scrape health.</p></article>
+        <article class="card"><h3>Correlated</h3><p>Immutable build, runtime, and model revisions identify the code and artifact responsible. A rotated process epoch proves new telemetry arrived.</p></article>
+        <article class="card"><h3>Never exported</h3><p>Credentials, IDs, transcript text, audio, digests, raw URLs, client addresses, user agents, paths, arbitrary errors, or request bodies.</p></article>
+      </div>
+    </div></section>
+
+    <section id="safety"><div class="shell">
+      <h2>Failure and security posture</h2>
+      <div class="grid">
+        <article class="card"><span class="tag built">Fail closed</span><h3>No Ronin, no remote dictation</h3><p>The iPhone reports the failure. It does not queue speech, switch providers, or pretend a local result exists.</p></article>
+        <article class="card"><span class="tag built">Independent auth</span><h3>Tailscale is not the credential</h3><p>Reachability and application authorization are separate. Every installation can be rotated or revoked without disrupting the other devices.</p></article>
+        <article class="card"><span class="tag built">Bounded work</span><h3>Pressure becomes an error</h3><p>Audio buffers, request bodies, inference concurrency, transcript size, retained responses, and telemetry dimensions all have explicit limits.</p></article>
+        <article class="card"><span class="tag built">At-most-once</span><h3>No duplicate cursor insertion</h3><p>The keyboard consumes the pending transcript before calling iOS. A rare extension death in that gap can lose text, but cannot duplicate it.</p></article>
+        <article class="card"><span class="tag built">Recoverable storage</span><h3>Online backup, offline restore</h3><p>Registered SQLite schemas are fingerprinted and integrity checked. Restore stops traffic and forces every restored Device Principal to reauthorize.</p></article>
+        <article class="card"><span class="tag risk">Platform constraint</span><h3>iOS owns the lifecycle</h3><p>A keyboard cannot launch its app or record directly. The Action Button foreground arm plus warm containing app is the supported personal workflow.</p></article>
+      </div>
+    </div></section>
+
+    <section id="roadmap"><div class="shell">
+      <h2>What to work on next</h2>
+      <p class="intro">Priorities preserve the working slice first, then move shared product meaning to Ronin, then add clients and higher-level features.</p>
+      <div class="roadmap">
+        <div class="road"><strong>Now</strong><h3>Finish the physical acceptance gate</h3><p>Repeat multiple real keyboard insertions in one arm, move between text fields, exercise cancel during every phase, and record stop-to-insert latency, battery, thermal, and memory baselines.</p></div>
+        <div class="road"><strong>Now</strong><h3>Harden real-device audio lifecycle</h3><p>Measure route changes, interruptions, iOS process suspension, Bluetooth input, and device-sized audio callbacks. Keep regression tests tied to observed phone behavior.</p></div>
+        <div class="road"><strong>Next</strong><h3>Make Ronin own the Transcript Profile</h3><p>Add a versioned profile repository, ETags and <code>If-Match</code>, immutable per-dictation snapshots, and the inherited deterministic Hex transform pipeline. This is the settings-sharing seam.</p></div>
+        <div class="road"><strong>Next</strong><h3>Connect macOS and build Windows</h3><p>Give each installation its own Device Principal. Start Windows with WASAPI capture, a global toggle hotkey, Tailscale HTTPS, DPAPI credential storage, and clipboard-preserving insertion.</p></div>
+        <div class="road"><strong>Then</strong><h3>Set latency budgets from evidence</h3><p>Turn the physical baseline into minimum sample counts, p50/p95/p99 regression thresholds, dashboards, and alerts. Investigate the slowest recorded span rather than guessing.</p></div>
+        <div class="road"><strong>Later</strong><h3>Statistics and transcript styles</h3><p>Add content-free aggregate WPM and word counts exactly once per Dictation. Experiment with normal, casual, and professional styles behind a bounded, isolated rewriter with a deterministic fallback.</p></div>
+      </div>
+    </div></section>
+  </main>
+
+  <footer class="shell">
+    <p><strong>Source of truth:</strong> this visual summarizes <a href="personal-cross-platform-target.md">the target architecture</a>, <a href="../adr/0001-model-one-owner-through-device-principals.md">ADRs 0001–0007</a>, and the <a href="../../Prototypes/PersonalDictationTracer/README.md">working tracer</a>. When this page and those typed contracts disagree, the contracts and accepted ADRs win.</p>
+  </footer>
+</body>
+</html>
