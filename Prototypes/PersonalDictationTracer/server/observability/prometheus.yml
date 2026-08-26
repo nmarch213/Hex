@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/latency.rules.yml
+
+scrape_configs:
+  - job_name: hex-otel-collector
+    static_configs:
+      - targets:
+          - otel-collector:9464

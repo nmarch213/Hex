@@ -1,0 +1,73 @@
+groups:
+  - name: hex-latency
+    interval: 15s
+    rules:
+      - record: hex:http_server_duration_ms:p50_24h
+        expr: >-
+          histogram_quantile(0.50,
+            sum by (le, audio_duration_bucket, service_revision, hex_runtime_revision, hex_model_revision)
+            (increase(hex_http_server_duration_ms_bucket{route="/v1/transcribe",outcome="success",replayed="false"}[24h])))
+      - record: hex:http_server_duration_ms:p95_24h
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le, audio_duration_bucket, service_revision, hex_runtime_revision, hex_model_revision)
+            (increase(hex_http_server_duration_ms_bucket{route="/v1/transcribe",outcome="success",replayed="false"}[24h])))
+      - record: hex:http_server_duration_ms:p99_24h
+        expr: >-
+          histogram_quantile(0.99,
+            sum by (le, audio_duration_bucket, service_revision, hex_runtime_revision, hex_model_revision)
+            (increase(hex_http_server_duration_ms_bucket{route="/v1/transcribe",outcome="success",replayed="false"}[24h])))
+      - record: hex:http_server_requests:count_24h
+        expr: >-
+          sum by (audio_duration_bucket, service_revision, hex_runtime_revision, hex_model_revision)
+          (increase(hex_http_server_requests_total{route="/v1/transcribe",outcome="success",replayed="false"}[24h]))
+      - record: hex:dictation_service_duration_ms:p95_24h
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le, audio_duration_bucket, service_revision, hex_runtime_revision, hex_model_revision)
+            (increase(hex_dictation_service_duration_ms_bucket[24h])))
+      - record: hex:recognition_realtime_factor:p50_24h
+        expr: >-
+          histogram_quantile(0.50,
+            sum by (le, audio_duration_bucket, service_revision, hex_runtime_revision, hex_model_revision)
+            (increase(hex_dictation_recognition_realtime_factor_bucket[24h])))
+      - record: hex:recognition_realtime_factor:p95_24h
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le, audio_duration_bucket, service_revision, hex_runtime_revision, hex_model_revision)
+            (increase(hex_dictation_recognition_realtime_factor_bucket[24h])))
+      - record: hex:recognition_realtime_factor:p99_24h
+        expr: >-
+          histogram_quantile(0.99,
+            sum by (le, audio_duration_bucket, service_revision, hex_runtime_revision, hex_model_revision)
+            (increase(hex_dictation_recognition_realtime_factor_bucket[24h])))
+      - record: hex:dictation_stage_duration_ms:p50_24h
+        expr: >-
+          histogram_quantile(0.50,
+            sum by (le, stage, service_revision, hex_runtime_revision, hex_model_revision)
+            (increase(hex_dictation_stage_duration_ms_bucket[24h])))
+      - record: hex:dictation_stage_duration_ms:p95_24h
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le, stage, service_revision, hex_runtime_revision, hex_model_revision)
+            (increase(hex_dictation_stage_duration_ms_bucket[24h])))
+      - record: hex:dictation_stage_duration_ms:p99_24h
+        expr: >-
+          histogram_quantile(0.99,
+            sum by (le, stage, service_revision, hex_runtime_revision, hex_model_revision)
+            (increase(hex_dictation_stage_duration_ms_bucket[24h])))
+      - alert: HexTelemetryScrapeMissing
+        expr: up{job="hex-otel-collector"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Hex latency telemetry has been unavailable for five minutes
+      - alert: HexApplicationTelemetryMissing
+        expr: >-
+          absent(hex_http_server_requests_total{route="/health",outcome="success"})
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Hex has exported no successful health telemetry for five minutes

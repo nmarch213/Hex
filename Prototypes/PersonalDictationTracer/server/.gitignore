@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+backups/*
+!backups/.gitignore
+secrets/health-probe-token
+secrets/health-probe-token.device-id
+secrets/.health-probe-token.*
+secrets/.restored-health-enrollment*
+secrets/proxy-token
+data/
+dist/
+node_modules/
+compose.override.yaml

@@ -1,0 +1,296 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  effect-service:
+    name: Effect service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Prototypes/PersonalDictationTracer/server
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: Prototypes/PersonalDictationTracer/server/package-lock.json
+      - name: Validate operational shell scripts
+        run: |
+          bash -n \
+            compose-command.sh configure-secret.sh container-smoke.sh deploy.sh device-admin.sh preflight.sh \
+            operations-lock.sh operations-lock-smoke.sh prepare-model.sh \
+            production-container-smoke.sh rotate-secret.sh smoke.sh \
+            reauthorize-after-restore.sh \
+            stop.sh storage-backup.sh storage-finalize-recovery.sh \
+            storage-restore.sh storage-startup-guard-smoke.sh
+          shellcheck \
+            compose-command.sh configure-secret.sh container-smoke.sh deploy.sh device-admin.sh preflight.sh \
+            operations-lock.sh operations-lock-smoke.sh prepare-model.sh \
+            production-container-smoke.sh rotate-secret.sh smoke.sh \
+            reauthorize-after-restore.sh \
+            stop.sh storage-backup.sh storage-finalize-recovery.sh \
+            storage-restore.sh storage-startup-guard-smoke.sh
+          node --check \
+            authenticated-health-check.mjs container-upstream-stub.mjs \
+            latency-report.mjs production-container-client.mjs \
+            telemetry-health-check.mjs verify-json-logs.mjs
+          bash operations-lock-smoke.sh
+          unsafe_output_directory="$(mktemp -d)"
+          chmod 777 "$unsafe_output_directory"
+          if output="$(bash device-admin.sh enroll test ios \
+            "$unsafe_output_directory/credential" 2>&1)"; then
+            printf 'device-admin.sh accepted an unsafe output directory.\n' >&2
+            exit 1
+          fi
+          grep -Fq 'Credential output directory must be owner-only.' <<<"$output"
+          rmdir "$unsafe_output_directory"
+          for operation in deploy.sh device-admin.sh rotate-secret.sh \
+            storage-backup.sh storage-finalize-recovery.sh storage-restore.sh \
+            stop.sh; do
+            # Match the literal sourced variable rather than expanding it here.
+            # shellcheck disable=SC2016
+            grep -Fq 'source "$script_directory/compose-command.sh"' "$operation"
+          done
+          compose_test_directory="$(mktemp -d)"
+          printf 'services: {}\n' >"$compose_test_directory/compose.yaml"
+          printf 'services: {}\n' >"$compose_test_directory/compose.override.yaml"
+          chmod 600 "$compose_test_directory/compose.override.yaml"
+          source compose-command.sh
+          hex_compose_initialize "$compose_test_directory"
+          test "$HEX_COMPOSE_OVERRIDE_ACTIVE" = 1
+          test "${compose[*]}" = \
+            "docker compose --project-name server -f $compose_test_directory/compose.yaml -f $compose_test_directory/compose.override.yaml"
+          chmod 622 "$compose_test_directory/compose.override.yaml"
+          if output="$(hex_compose_initialize "$compose_test_directory" 2>&1)"; then
+            printf 'Compose helper accepted a writable override.\n' >&2
+            exit 1
+          fi
+          grep -Fq 'not group/world writable' <<<"$output"
+          rm "$compose_test_directory/compose.override.yaml"
+          ln -s compose.yaml "$compose_test_directory/compose.override.yaml"
+          if output="$(hex_compose_initialize "$compose_test_directory" 2>&1)"; then
+            printf 'Compose helper accepted a symlinked override.\n' >&2
+            exit 1
+          fi
+          grep -Fq 'Refusing a symlinked Compose override' <<<"$output"
+          rm -rf "$compose_test_directory"
+          grep -Fxq 'backups/' .dockerignore
+          grep -Fxq 'compose.override.yaml' .dockerignore
+          if output="$(HEX_DEPLOY_WAIT_SECONDS=0 bash deploy.sh 2>&1)"; then
+            printf 'deploy.sh accepted an invalid wait interval.\n' >&2
+            exit 1
+          fi
+          grep -Fq \
+            'HEX_DEPLOY_WAIT_SECONDS must be an integer from 1 through 3600.' \
+            <<<"$output"
+          if output="$(bash storage-restore.sh invalid 2>&1)"; then
+            printf 'storage-restore.sh accepted an invalid artifact name.\n' >&2
+            exit 1
+          fi
+          grep -Fq 'Usage: storage-restore.sh' <<<"$output"
+      - run: npm ci --ignore-scripts
+      - run: npm run validate
+      - name: Drill multi-database backup and restore
+        run: |
+          npm run storage:drill
+          bash storage-startup-guard-smoke.sh
+      - run: npm audit
+      - name: Authenticated HTTP smoke test
+        working-directory: Prototypes/PersonalDictationTracer
+        run: bash server/smoke.sh
+      - name: Validate hardened Compose configuration
+        run: |
+          set -euo pipefail
+          mkdir -p backups secrets runtime models
+          chmod 700 backups
+          dummy_token="$(openssl rand -hex 32)"
+          printf '%s\n' "$dummy_token" > secrets/health-probe-token
+          openssl rand -hex 32 > runtime/upstream-epoch
+          chmod 600 secrets/health-probe-token
+          : > models/tdt-0.6b-v2-f16.gguf
+          rendered="$(
+            COMPOSE_PROJECT_NAME=hostile \
+              docker compose --project-name server -f compose.yaml config
+          )"
+          if grep -Fq "$dummy_token" <<<"$rendered"; then
+            printf 'Compose rendered the bearer credential.\n' >&2
+            exit 1
+          fi
+          rendered_json="$(
+            COMPOSE_PROJECT_NAME=hostile \
+              docker compose --project-name server --profile storage-admin \
+                --profile device-admin \
+                -f compose.yaml config --format json
+          )"
+          jq --exit-status \
+            --arg model_sha256 "f8df7f5dc7b9ceb5cd0637a81194aab5d93022ace555ce81c8969c7a694b8f3d" \
+            '
+              .name == "server" and
+              .services.parakeet.entrypoint == ["/bin/sh", "-ec"] and
+              .services.parakeet.restart == "no" and
+              (.services.parakeet.command[0] | contains($model_sha256)) and
+              (.services.parakeet.command[0] | contains("sha256sum --check --status")) and
+              .services["hex-proxy"].environment.HEX_DEVICE_REGISTRY_DB_PATH ==
+                "/var/lib/hex-personal-dictation/devices.sqlite" and
+              .services["hex-proxy"].environment.HEX_OTLP_BASE_URL ==
+                "http://otel-collector:4318" and
+              (.services["hex-proxy"].environment | has("HEX_PROXY_TOKEN") | not) and
+              .networks["hex-internal"].internal == true and
+              (.services["hex-proxy"].ports | length) == 1 and
+              .services["hex-proxy"].ports[0].host_ip == "127.0.0.1" and
+              .services["hex-proxy"].ports[0].target == 8787 and
+              .services["hex-proxy"].ports[0].published == "8787" and
+              .services["otel-collector"].image ==
+                "otel/opentelemetry-collector-contrib@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc" and
+              .services["otel-collector"].ports == null and
+              .services["otel-collector"].read_only == true and
+              .services["otel-collector"].pids_limit == 64 and
+              .services["otel-collector"].mem_limit == "134217728" and
+              .services.prometheus.image ==
+                "prom/prometheus@sha256:f3b6aae627d96e7ad8256cdf6de5953247735117c6f577383fadb42efeeea7bc" and
+              (.services.prometheus.ports | length) == 1 and
+              .services.prometheus.ports[0].host_ip == "127.0.0.1" and
+              .services.prometheus.ports[0].published == "9090" and
+              .services.prometheus.ports[0].target == 9090 and
+              .services.prometheus.read_only == true and
+              .services.prometheus.pids_limit == 128 and
+              .services.prometheus.mem_limit == "536870912" and
+              any(.services.prometheus.command[];
+                . == "--storage.tsdb.retention.time=14d") and
+              any(.services.prometheus.command[];
+                . == "--storage.tsdb.retention.size=2GB") and
+              .services["device-admin"].network_mode == "none" and
+              .services["device-admin"].environment.HEX_HEALTH_PROBE_CREDENTIAL_FILE ==
+                "/run/secrets/hex_health_probe_token" and
+              any(.services["device-admin"].secrets[];
+                .source == "hex_health_probe_token") and
+              .services["storage-backup"].network_mode == "none" and
+              .services["storage-backup"].ports == null and
+              .services["storage-backup"].secrets == null and
+              .services["storage-restore"].network_mode == "none" and
+              .services["storage-restore"].ports == null and
+              .services["storage-restore"].secrets == null and
+              any(.services["storage-restore"].volumes[];
+                .target == "/var/backups/hex-personal-dictation" and
+                .read_only == true)
+            ' <<<"$rendered_json" >/dev/null
+          monitoring_project=hex-observability-ci
+          cleanup_monitoring() {
+            docker compose --project-name "$monitoring_project" \
+              -f compose.yaml down --volumes >/dev/null 2>&1 || true
+          }
+          trap cleanup_monitoring EXIT
+          docker compose --project-name "$monitoring_project" \
+            -f compose.yaml up --detach --wait --wait-timeout 60 \
+            otel-collector prometheus
+          report_attempts=0
+          until node latency-report.mjs > latency-report.json; do
+            ((report_attempts += 1))
+            if ((report_attempts >= 5)); then
+              printf 'Prometheus query API did not become reachable.\n' >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          jq --exit-status \
+            'to_entries | length == 11 and all(.[]; (.value | type) == "array")' \
+            latency-report.json >/dev/null
+          rm latency-report.json
+          cleanup_monitoring
+          trap - EXIT
+      - name: Resolve immutable external images
+        run: |
+          docker buildx imagetools inspect \
+            node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 \
+            >/dev/null
+          docker buildx imagetools inspect \
+            ghcr.io/mudler/parakeet.cpp-server@sha256:4a5d92e41356cb5d691e3644d31cf4cc2c0be1536f165fff9f2c5ec852c29348 \
+            >/dev/null
+          docker buildx imagetools inspect \
+            otel/opentelemetry-collector-contrib@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc \
+            >/dev/null
+          docker buildx imagetools inspect \
+            prom/prometheus@sha256:f3b6aae627d96e7ad8256cdf6de5953247735117c6f577383fadb42efeeea7bc \
+            >/dev/null
+          docker run --rm \
+            --volume "$PWD/observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro" \
+            otel/opentelemetry-collector-contrib@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc \
+            validate --config=/etc/otelcol-contrib/config.yaml
+          docker run --rm \
+            --entrypoint /bin/promtool \
+            --volume "$PWD/observability:/etc/prometheus:ro" \
+            prom/prometheus@sha256:f3b6aae627d96e7ad8256cdf6de5953247735117c6f577383fadb42efeeea7bc \
+            check config /etc/prometheus/prometheus.yml
+          docker run --rm \
+            --entrypoint sha256sum \
+            ghcr.io/mudler/parakeet.cpp-server@sha256:4a5d92e41356cb5d691e3644d31cf4cc2c0be1536f165fff9f2c5ec852c29348 \
+            --version >/dev/null
+      - name: Build and smoke the production container
+        run: |
+          docker build \
+            --build-arg "HEX_BUILD_REVISION=${GITHUB_SHA}" \
+            --tag hex-personal-dictation:test .
+          test "$(docker image inspect \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+            hex-personal-dictation:test)" = "$GITHUB_SHA"
+          bash container-smoke.sh hex-personal-dictation:test
+          bash production-container-smoke.sh hex-personal-dictation:test
+
+  apple-clients:
+    name: Swift and iOS
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: Prototypes/PersonalDictationTracer/server/package-lock.json
+      - name: Install Effect service dependencies
+        working-directory: Prototypes/PersonalDictationTracer/server
+        run: npm ci --ignore-scripts
+      - name: Install pinned XcodeGen
+        run: |
+          curl --fail --location --show-error \
+            --output "$RUNNER_TEMP/xcodegen.zip" \
+            https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
+          printf '%s  %s\n' \
+            4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806 \
+            "$RUNNER_TEMP/xcodegen.zip" | shasum -a 256 --check
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          printf '%s\n' "$RUNNER_TEMP/xcodegen/bin" >>"$GITHUB_PATH"
+          "$RUNNER_TEMP/xcodegen/bin/xcodegen" --version
+      - name: Test HexCore
+        working-directory: HexCore
+        run: swift test
+      - name: Build the original macOS app
+        run: >-
+          xcodebuild build -quiet
+          -project Hex.xcodeproj
+          -scheme Hex
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$RUNNER_TEMP/hex-macos-derived-data"
+          CODE_SIGNING_ALLOWED=NO
+          -skipMacroValidation
+      - name: Validate and build the iOS client
+        working-directory: Prototypes/PersonalDictationTracer
+        run: |
+          make validate build build-release build-device-release
+          test -f ios/.releaseDerivedData/Build/Products/Release-iphonesimulator/HexKeyboardTracer.app/PrivacyInfo.xcprivacy
+          test -f ios/.releaseDerivedData/Build/Products/Release-iphonesimulator/HexKeyboardTracer.app/PlugIns/HexKeyboardExtension.appex/PrivacyInfo.xcprivacy
+          test -f ios/.deviceDerivedData/Build/Products/Release-iphoneos/HexKeyboardTracer.app/PrivacyInfo.xcprivacy
+          test -f ios/.deviceDerivedData/Build/Products/Release-iphoneos/HexKeyboardTracer.app/PlugIns/HexKeyboardExtension.appex/PrivacyInfo.xcprivacy

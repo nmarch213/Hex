@@ -1,0 +1,112 @@
+name: HexKeyboardTracer
+
+options:
+  createIntermediateGroups: true
+  minimumXcodeGenVersion: 2.46.0
+  deploymentTarget:
+    iOS: "18.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: FFMNHVDZV4
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 0.0.1
+    TARGETED_DEVICE_FAMILY: "1"
+
+targets:
+  HexKeyboardTracer:
+    type: application
+    platform: iOS
+    sources:
+      - App/Sources
+      - path: App/Resources
+        buildPhase: resources
+      - Shared/Sources
+      - path: ../../../HexCore/Sources/HexCore/Models/WordRemoval.swift
+      - path: ../../../HexCore/Sources/HexCore/Models/WordRemapping.swift
+      - path: ../../../HexCore/Sources/HexCore/Models/TranscriptFormatting.swift
+      - path: ../../../HexCore/Sources/HexCore/Logging.swift
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Hex
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSMicrophoneUsageDescription: Hex records your voice so your private Ronin server can transcribe it.
+        UILaunchScreen: {}
+        UIBackgroundModes:
+          - audio
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    entitlements:
+      path: App/HexKeyboardTracer.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.nmarch213.HexKeyboardTracer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nmarch213.HexKeyboardTracer
+        PRODUCT_NAME: HexKeyboardTracer
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - target: HexKeyboardExtension
+
+  HexKeyboardExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Keyboard/Sources
+      - path: Keyboard/Resources
+        buildPhase: resources
+      - Shared/Sources
+      - path: ../../../HexCore/Sources/HexCore/Logging.swift
+    info:
+      path: Keyboard/Info.plist
+      properties:
+        CFBundleDisplayName: Hex
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionAttributes:
+            IsASCIICapable: true
+            PrimaryLanguage: en-US
+            RequestsOpenAccess: true
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+    entitlements:
+      path: Keyboard/HexKeyboardExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.nmarch213.HexKeyboardTracer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nmarch213.HexKeyboardTracer.Keyboard
+        PRODUCT_NAME: HexKeyboardExtension
+        GENERATE_INFOPLIST_FILE: NO
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+
+  HexKeyboardTracerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - App/Tests
+    dependencies:
+      - target: HexKeyboardTracer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nmarch213.HexKeyboardTracerTests
+
+schemes:
+  HexKeyboardTracer:
+    build:
+      targets:
+        HexKeyboardTracer: all
+        HexKeyboardTracerTests: [test]
+    run:
+      config: Debug
+    test:
+      targets:
+        - HexKeyboardTracerTests
