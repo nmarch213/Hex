@@ -60,11 +60,23 @@ final class AudioTapRingTests: XCTestCase {
         try ring.stopCapture(requestID: requestID)
     }
 
+    func testDeviceSizedTapIsAcceptedWithoutBackpressure() throws {
+        let ring = try AudioTapRing(inputFormat: format)
+        try ring.beginCapture(requestID: UUID())
+
+        XCTAssertEqual(
+            ring.push(makeBuffer(marker: 1, frameCount: 4_800)),
+            .enqueued
+        )
+        XCTAssertNil(ring.pendingFailure())
+        XCTAssertEqual(ring.peek()?.frameLength, 4_800)
+    }
+
     func testOversizedTapFailsAsBackpressureWithoutAllocation() throws {
         let ring = try AudioTapRing(inputFormat: format)
         try ring.beginCapture(requestID: UUID())
         XCTAssertEqual(
-            ring.push(makeBuffer(marker: 1, frameCount: 1_025)),
+            ring.push(makeBuffer(marker: 1, frameCount: 8_193)),
             .failed
         )
         XCTAssertEqual(ring.pendingFailure(), .writerBackpressureExceeded)

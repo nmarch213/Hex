@@ -1036,7 +1036,10 @@ final class AudioTapRing: @unchecked Sendable {
     }
 
     private static let capacity = 32
-    private static let maximumFramesPerTap: AVAudioFrameCount = 1_024
+    /// `installTap(bufferSize:)` is advisory. Physical iPhones can deliver 4,800-frame
+    /// input buffers even when the requested size is 1,024, so preallocate enough room
+    /// for the observed hardware callback while keeping the real-time boundary bounded.
+    private static let maximumFramesPerTap: AVAudioFrameCount = 8_192
 
     private let slots: [AVAudioPCMBuffer]
     private let inputDescription: AudioStreamBasicDescription
