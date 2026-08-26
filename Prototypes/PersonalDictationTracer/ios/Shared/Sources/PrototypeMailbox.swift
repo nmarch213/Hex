@@ -335,12 +335,6 @@ enum PrototypeIPCStore {
                 at: directory,
                 withIntermediateDirectories: true
             )
-#if os(iOS)
-            var resourceValues = URLResourceValues()
-            resourceValues.isExcludedFromBackup = true
-            var protectedDirectory = directory
-            try protectedDirectory.setResourceValues(resourceValues)
-#endif
         } catch {
             throw .ioFailure(
                 operation: "create container",
