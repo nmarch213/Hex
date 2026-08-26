@@ -73,6 +73,20 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         return button
     }()
 
+    private lazy var cancelButton: UIButton = {
+        var configuration = UIButton.Configuration.tinted()
+        configuration.cornerStyle = .capsule
+        configuration.image = UIImage(systemName: "xmark")
+
+        let button = UIButton(configuration: configuration)
+        button.accessibilityIdentifier = "hex.cancel-dictation"
+        button.accessibilityLabel = "Cancel Dictation"
+        button.accessibilityHint = "Discards the current voice input and resets Hex"
+        button.addTarget(self, action: #selector(handleCancelButton), for: .touchUpInside)
+        button.isHidden = true
+        return button
+    }()
+
     private let rowsStack: UIStackView = {
         let stack = UIStackView()
         stack.axis = .vertical
@@ -119,13 +133,17 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func configureLayout() {
-        let actionRow = UIStackView(arrangedSubviews: [statusLabel, dictationButton])
+        let actionRow = UIStackView(
+            arrangedSubviews: [statusLabel, cancelButton, dictationButton]
+        )
         actionRow.axis = .horizontal
         actionRow.alignment = .center
         actionRow.spacing = 12
 
         dictationButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 132).isActive = true
         dictationButton.heightAnchor.constraint(equalToConstant: 42).isActive = true
+        cancelButton.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        cancelButton.heightAnchor.constraint(equalToConstant: 42).isActive = true
 
         let stack = UIStackView(arrangedSubviews: [actionRow, rowsStack])
         stack.axis = .vertical
@@ -397,6 +415,24 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         }
     }
 
+    @objc private func handleCancelButton() {
+        guard hasFullAccess else {
+            renderState(note: "Allow Full Access in Settings")
+            return
+        }
+
+        do {
+            guard let record = try PrototypeMailbox.current() else {
+                refreshState(note: "Voice input reset")
+                return
+            }
+            try PrototypeMailbox.requestCancel(id: record.id)
+            refreshState(note: "Cancelling…")
+        } catch {
+            renderIPCFailure(error)
+        }
+    }
+
     private func startDictationOrPromptArm() throws(PrototypeIPCError) {
         guard try PrototypeWarmSession.current()?.isReady() == true else {
             renderState(note: "Hold the Action Button to Arm Hex")
@@ -559,6 +595,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         statusLabel.text = note
 
         guard hasFullAccess else {
+            cancelButton.isHidden = true
             dictationButton.configuration?.title = "Full Access Required"
             dictationButton.configuration?.image = UIImage(systemName: "lock.fill")
             dictationButton.isEnabled = true
@@ -570,16 +607,29 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         let warmSessionReady = snapshot?.warmSession?.isReady() == true
         switch record?.state {
         case .captureRequested, .capturing:
+            cancelButton.isHidden = false
+            cancelButton.isEnabled = true
             dictationButton.configuration?.image = UIImage(systemName: "stop.fill")
             dictationButton.configuration?.title = "Stop Voice"
             dictationButton.configuration?.baseBackgroundColor = .systemRed
             dictationButton.isEnabled = true
-        case .stopRequested, .processing, .cancelRequested:
+        case .stopRequested, .processing:
+            cancelButton.isHidden = false
+            cancelButton.isEnabled = true
             dictationButton.configuration?.image = UIImage(systemName: "waveform")
             dictationButton.configuration?.title = "Sending…"
             dictationButton.configuration?.baseBackgroundColor = .systemBlue
             dictationButton.isEnabled = false
+        case .cancelRequested:
+            cancelButton.isHidden = false
+            cancelButton.isEnabled = false
+            dictationButton.configuration?.image = UIImage(systemName: "xmark")
+            dictationButton.configuration?.title = "Cancelling…"
+            dictationButton.configuration?.baseBackgroundColor = .systemOrange
+            dictationButton.isEnabled = false
         case .completed:
+            cancelButton.isHidden = false
+            cancelButton.isEnabled = true
             if let record, isCurrentTextDestination(for: record) {
                 dictationButton.configuration?.image = UIImage(systemName: "arrow.down.to.line")
                 dictationButton.configuration?.title = "Insert Transcript"
@@ -591,6 +641,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             }
             dictationButton.isEnabled = true
         case .consumed, .failed, nil:
+            cancelButton.isHidden = true
             dictationButton.configuration?.image = UIImage(systemName: "mic.fill")
             dictationButton.configuration?.baseBackgroundColor = .systemBlue
             if warmSessionReady {
@@ -624,10 +675,9 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         do {
             guard let record = try PrototypeMailbox.current() else { return }
             switch record.state {
-            case .captureRequested, .capturing:
+            case .captureRequested, .capturing, .stopRequested, .processing:
                 try PrototypeMailbox.requestCancel(id: record.id)
-            case .stopRequested, .cancelRequested, .processing,
-                 .completed, .consumed, .failed:
+            case .cancelRequested, .completed, .consumed, .failed:
                 break
             }
         } catch {

@@ -212,7 +212,7 @@ struct PrototypeMailboxSmoke {
         }
 
         let documentIdentifier = UUID()
-        let requestID = try PrototypeMailbox.requestCapture(
+        var requestID = try PrototypeMailbox.requestCapture(
             documentIdentifier: documentIdentifier
         )
         try require(state: .captureRequested, id: requestID)
@@ -247,19 +247,25 @@ struct PrototypeMailboxSmoke {
         }
 
         try PrototypeMailbox.requestStop(id: requestID)
+        try PrototypeMailbox.requestCancel(id: requestID)
+        try require(state: .cancelRequested, id: requestID)
+        precondition(
+            PrototypeWarmCaptureCommand.nextAction(
+                for: .cancelRequested,
+                isBusy: false,
+                isRecording: false
+            ) == .cancel
+        )
+
+        try PrototypeMailbox.clear()
+        requestID = try PrototypeMailbox.requestCapture(
+            documentIdentifier: documentIdentifier
+        )
+        try PrototypeMailbox.requestStop(id: requestID)
         let earlyStop = try require(state: .stopRequested, id: requestID)
         guard let earlyStopRequestedAt = earlyStop.stopRequestedAt else {
             preconditionFailure("Early Stop timestamp was not preserved")
         }
-        try PrototypeMailbox.requestCancel(id: requestID)
-        try require(state: .stopRequested, id: requestID)
-        precondition(
-            PrototypeWarmCaptureCommand.nextAction(
-                for: .stopRequested,
-                isBusy: false,
-                isRecording: false
-            ) == .startThenStop
-        )
 
         let captureID = try PrototypeMailbox.beginCapture(id: requestID)
         precondition(captureID == requestID)
@@ -336,6 +342,25 @@ struct PrototypeMailboxSmoke {
         precondition(thirdID != secondID)
 
         try PrototypeMailbox.clear()
+
+        let processingID = try PrototypeMailbox.requestCapture(
+            documentIdentifier: UUID()
+        )
+        _ = try PrototypeMailbox.beginCapture(id: processingID)
+        try PrototypeMailbox.requestStop(id: processingID)
+        try PrototypeMailbox.markProcessing(id: processingID)
+        try PrototypeMailbox.requestCancel(id: processingID)
+        let cancelledProcessing = try require(state: .cancelRequested, id: processingID)
+        precondition(cancelledProcessing.transcript.isEmpty)
+
+        try PrototypeMailbox.clear()
+        let completedID = try completeRequest(
+            documentIdentifier: UUID(),
+            transcript: "discard me"
+        )
+        try PrototypeMailbox.requestCancel(id: completedID)
+        let resetMailbox = try PrototypeMailbox.current()
+        precondition(resetMailbox == nil)
     }
 
     private static func testCompletedConsumptionRequiresSnapshotIdentity() throws {

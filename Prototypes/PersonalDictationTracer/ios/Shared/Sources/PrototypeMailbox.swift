@@ -682,23 +682,21 @@ enum PrototypeMailbox {
             (directory: URL) throws(PrototypeIPCError) -> Void in
             var record = try requireRecord(id: id, in: directory)
             switch record.state {
-            case .captureRequested, .capturing:
+            case .captureRequested, .capturing, .stopRequested, .processing:
                 record.state = .cancelRequested
-                record.errorMessage = "Voice entry was cancelled when the Hex keyboard closed."
+                record.transcript = ""
+                record.errorMessage = "Voice entry cancelled."
                 try PrototypeIPCStore.remove(.stopRequest, in: directory)
                 try PrototypeIPCStore.write(
                     record,
                     file: .mailboxRecord,
                     in: directory
                 )
-            case .stopRequested, .cancelRequested:
+            case .cancelRequested:
                 break
-            case .processing, .completed, .consumed, .failed:
-                throw .illegalMailboxTransition(
-                    id: record.id,
-                    from: record.state,
-                    to: .cancelRequested
-                )
+            case .completed, .consumed, .failed:
+                try PrototypeIPCStore.remove(.stopRequest, in: directory)
+                try PrototypeIPCStore.remove(.mailboxRecord, in: directory)
             }
         }
     }

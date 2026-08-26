@@ -385,7 +385,8 @@ private extension PrototypeDictationWorkflow {
             await cancelRecording(
                 requestID: record.id,
                 message: record.errorMessage
-                    ?? "Voice entry was cancelled because the Hex keyboard closed."
+                    ?? "Voice entry cancelled.",
+                resetMailbox: true
             )
         case .none:
             break
@@ -393,7 +394,8 @@ private extension PrototypeDictationWorkflow {
     }
     private func cancelRecording(
         requestID: UUID,
-        message: String
+        message: String,
+        resetMailbox: Bool = false
     ) async {
         cancelTranscriptionTask()
         let activeRequestID = self.requestID
@@ -418,8 +420,17 @@ private extension PrototypeDictationWorkflow {
                 }
             }
         }
-        guard await recordMailboxFailure(id: requestID, message: message) else {
-            return
+        if resetMailbox {
+            do {
+                try await dependencies.ipc.clearMailbox()
+            } catch {
+                await handleIPCFailure(error)
+                return
+            }
+        } else {
+            guard await recordMailboxFailure(id: requestID, message: message) else {
+                return
+            }
         }
         if state.isArmed, let sessionID = state.warmSessionRecord?.id {
             do {

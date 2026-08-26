@@ -110,6 +110,38 @@ final class PrototypeDictationWorkflowTests: XCTestCase {
         XCTAssertEqual(removedRequestIDs, [requestID])
     }
 
+    func testKeyboardCancelResetsDictationWhileUploadIsProcessing() async throws {
+        let fixture = makeFixture(transcripts: ["must not complete"])
+        await fixture.system.setUploadSuspended(true)
+        await arm(fixture.workflow)
+
+        let requestID = UUID()
+        await fixture.system.requestCapture(id: requestID)
+        await fixture.workflow.send(.pollWarmCommands)
+        await fixture.system.requestKeyboardStop(id: requestID)
+        await fixture.workflow.send(.pollWarmCommands)
+        let uploadStarted = await fixture.system.waitForUploadStart()
+        XCTAssertTrue(uploadStarted)
+
+        try await fixture.system.requestKeyboardCancel(id: requestID)
+        await fixture.workflow.send(.pollWarmCommands)
+
+        let cancelledRecord = await fixture.system.mailboxRecord()
+        XCTAssertNil(cancelledRecord)
+        XCTAssertTrue(fixture.workflow.state.isArmed)
+        XCTAssertFalse(fixture.workflow.state.isRecording)
+        XCTAssertFalse(fixture.workflow.state.isBusy)
+
+        await fixture.system.resumeUpload()
+        let removalFinished = await fixture.system.waitForRemoval(requestID: requestID)
+        XCTAssertTrue(removalFinished)
+
+        let completedRequestIDs = await fixture.system.completedRequestIDs
+        let removedRequestIDs = await fixture.system.removedRequestIDs
+        XCTAssertTrue(completedRequestIDs.isEmpty)
+        XCTAssertEqual(removedRequestIDs, [requestID])
+    }
+
     func testDictationUsesPreferencesCapturedWhenRecordingStarts() async {
         let fixture = makeFixture(transcripts: ["um hello comma"])
         await fixture.system.setUploadSuspended(true)
@@ -727,6 +759,17 @@ private actor WorkflowTestSystem {
         default:
             throw .illegalMailboxTransition(id: id, from: mailbox.state, to: .stopRequested)
         }
+    }
+
+    func requestKeyboardCancel(id: UUID) throws(PrototypeIPCError) {
+        guard var mailbox else { throw .missingMailboxRecord(id) }
+        guard mailbox.id == id else {
+            throw .staleMailboxRecord(expected: id, actual: mailbox.id)
+        }
+        mailbox.state = .cancelRequested
+        mailbox.transcript = ""
+        mailbox.errorMessage = "Voice entry cancelled."
+        self.mailbox = mailbox
     }
 
     func failActiveCaptureIfKeyboardHeartbeatStale(
