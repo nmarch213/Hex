@@ -26,6 +26,13 @@ final class KeyboardViewController: UIInputViewController,
         case space
         case returnKey
         case nextKeyboard
+
+        var isCharacter: Bool {
+            if case .character = self {
+                return true
+            }
+            return false
+        }
     }
 
     private struct GlideCommit {
@@ -136,12 +143,32 @@ final class KeyboardViewController: UIInputViewController,
         }.withRenderingMode(.alwaysTemplate)
     }()
 
+    private static let voiceActionSymbolConfiguration = UIImage.SymbolConfiguration(
+        pointSize: 12,
+        weight: .semibold
+    )
+
+    private static let stopVoiceImage = UIImage(
+        systemName: "stop.fill",
+        withConfiguration: voiceActionSymbolConfiguration
+    )
+
+    private static let cancelVoiceImage = UIImage(
+        systemName: "xmark",
+        withConfiguration: voiceActionSymbolConfiguration
+    )
+
     private lazy var dictationButton: UIButton = {
         var configuration = UIButton.Configuration.filled()
         configuration.cornerStyle = .medium
         configuration.image = Self.hexVoiceImage
         configuration.baseForegroundColor = .white
         configuration.baseBackgroundColor = .systemBlue
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer {
+            var attributes = $0
+            attributes.font = .systemFont(ofSize: 13, weight: .semibold)
+            return attributes
+        }
         configuration.contentInsets = NSDirectionalEdgeInsets(
             top: 4,
             leading: 6,
@@ -150,6 +177,8 @@ final class KeyboardViewController: UIInputViewController,
         )
 
         let button = UIButton(configuration: configuration)
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
         button.accessibilityIdentifier = "hex.dictate"
         button.accessibilityLabel = "Hex Voice"
         button.accessibilityHint = "Starts or stops Hex voice entry for this text field"
@@ -230,7 +259,8 @@ final class KeyboardViewController: UIInputViewController,
         controlRow.alignment = .center
         controlRow.spacing = 4
 
-        dictationButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        candidateRow.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        dictationButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
         dictationButton.heightAnchor.constraint(equalToConstant: 28).isActive = true
         controlRow.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
@@ -590,7 +620,7 @@ final class KeyboardViewController: UIInputViewController,
             let row = UIStackView()
             row.axis = .horizontal
             row.alignment = .fill
-            row.distribution = .fillProportionally
+            row.distribution = keys.allSatisfy(\.isCharacter) ? .fillEqually : .fill
             row.spacing = 6
             if page == .letters, rowIndex == 1 {
                 row.isLayoutMarginsRelativeArrangement = true
@@ -602,11 +632,22 @@ final class KeyboardViewController: UIInputViewController,
                 )
             }
 
+            var firstCharacterButton: UIButton?
             for key in keys {
                 let button = makeButton(for: key)
                 row.addArrangedSubview(button)
                 keyButtons.append((key, button))
                 applyWidth(for: key, to: button)
+
+                if key.isCharacter, row.distribution == .fill {
+                    if let firstCharacterButton {
+                        button.widthAnchor.constraint(
+                            equalTo: firstCharacterButton.widthAnchor
+                        ).isActive = true
+                    } else {
+                        firstCharacterButton = button
+                    }
+                }
             }
             rowsStack.addArrangedSubview(row)
         }
@@ -619,6 +660,12 @@ final class KeyboardViewController: UIInputViewController,
         configuration.cornerStyle = .medium
         configuration.baseForegroundColor = .label
         configuration.baseBackgroundColor = backgroundColor(for: key)
+        configuration.contentInsets = NSDirectionalEdgeInsets(
+            top: 0,
+            leading: 2,
+            bottom: 0,
+            trailing: 2
+        )
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer {
             var attributes = $0
             attributes.font = .systemFont(ofSize: 22, weight: .regular)
@@ -626,6 +673,10 @@ final class KeyboardViewController: UIInputViewController,
         }
 
         let button = UIButton(configuration: configuration)
+        button.titleLabel?.adjustsFontSizeToFitWidth = true
+        button.titleLabel?.minimumScaleFactor = 0.65
+        button.titleLabel?.lineBreakMode = .byClipping
+        button.titleLabel?.numberOfLines = 1
         button.isAccessibilityElement = true
         button.accessibilityLabel = accessibilityLabel(for: key)
         button.accessibilityIdentifier = accessibilityIdentifier(for: key)
@@ -1026,19 +1077,25 @@ final class KeyboardViewController: UIInputViewController,
             updateVoiceButton(
                 color: .systemRed,
                 isEnabled: true,
-                accessibilityLabel: "Stop Hex Voice"
+                accessibilityLabel: "Stop Hex Voice",
+                image: Self.stopVoiceImage,
+                title: "Stop"
             )
         case .stopRequested, .processing:
             updateVoiceButton(
-                color: .systemOrange,
+                color: .systemRed,
                 isEnabled: true,
-                accessibilityLabel: "Cancel Hex Voice processing"
+                accessibilityLabel: "Cancel Hex Voice processing",
+                image: Self.cancelVoiceImage,
+                title: "Cancel"
             )
         case .cancelRequested:
             updateVoiceButton(
-                color: .systemOrange,
+                color: .systemGray,
                 isEnabled: false,
-                accessibilityLabel: "Cancelling Hex Voice"
+                accessibilityLabel: "Cancelling Hex Voice",
+                image: Self.cancelVoiceImage,
+                title: "Cancelling"
             )
         case .completed:
             if let record, isCurrentTextDestination(for: record) {
@@ -1066,10 +1123,13 @@ final class KeyboardViewController: UIInputViewController,
     private func updateVoiceButton(
         color: UIColor,
         isEnabled: Bool,
-        accessibilityLabel: String
+        accessibilityLabel: String,
+        image: UIImage? = nil,
+        title: String? = nil
     ) {
-        dictationButton.configuration?.image = Self.hexVoiceImage
-        dictationButton.configuration?.title = nil
+        dictationButton.configuration?.image = image ?? Self.hexVoiceImage
+        dictationButton.configuration?.title = title
+        dictationButton.configuration?.imagePadding = title == nil ? 0 : 4
         dictationButton.configuration?.baseForegroundColor = .white
         dictationButton.configuration?.baseBackgroundColor = color
         dictationButton.accessibilityLabel = accessibilityLabel
