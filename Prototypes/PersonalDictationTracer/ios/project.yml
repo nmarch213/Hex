@@ -60,6 +60,8 @@ targets:
       - Keyboard/Sources
       - path: Keyboard/Resources
         buildPhase: resources
+      - path: ../../../Hex/Assets.xcassets
+        buildPhase: resources
       - Shared/Sources
       - path: ../../../HexCore/Sources/HexCore/Logging.swift
     info:

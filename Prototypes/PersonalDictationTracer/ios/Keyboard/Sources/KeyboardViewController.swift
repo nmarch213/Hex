@@ -107,41 +107,32 @@ final class KeyboardViewController: UIInputViewController,
 
     var enableInputClicksWhenVisible: Bool { true }
 
-    private let statusLabel: UILabel = {
-        let label = UILabel()
-        label.font = .preferredFont(forTextStyle: .caption1)
-        label.adjustsFontForContentSizeCategory = true
-        label.textColor = .secondaryLabel
-        label.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return label
-    }()
+    private static let compactKeyboardHeight: CGFloat = 274
+
+    private static let hexVoiceImage = UIImage(
+        named: "HexIcon",
+        in: Bundle(for: KeyboardViewController.self),
+        compatibleWith: nil
+    )?.withRenderingMode(.alwaysTemplate) ?? UIImage(systemName: "hexagon")
 
     private lazy var dictationButton: UIButton = {
         var configuration = UIButton.Configuration.filled()
-        configuration.cornerStyle = .capsule
-        configuration.image = UIImage(systemName: "mic.fill")
-        configuration.imagePadding = 7
-        configuration.title = "Start Voice"
+        configuration.cornerStyle = .medium
+        configuration.image = Self.hexVoiceImage
+        configuration.baseForegroundColor = .white
+        configuration.baseBackgroundColor = .systemBlue
+        configuration.contentInsets = NSDirectionalEdgeInsets(
+            top: 7,
+            leading: 7,
+            bottom: 7,
+            trailing: 7
+        )
 
         let button = UIButton(configuration: configuration)
         button.accessibilityIdentifier = "hex.dictate"
+        button.accessibilityLabel = "Hex Voice"
         button.accessibilityHint = "Starts or stops Hex voice entry for this text field"
         button.addTarget(self, action: #selector(handleDictationButton), for: .touchUpInside)
-        return button
-    }()
-
-    private lazy var cancelButton: UIButton = {
-        var configuration = UIButton.Configuration.tinted()
-        configuration.cornerStyle = .capsule
-        configuration.image = UIImage(systemName: "xmark")
-
-        let button = UIButton(configuration: configuration)
-        button.accessibilityIdentifier = "hex.cancel-dictation"
-        button.accessibilityLabel = "Cancel Dictation"
-        button.accessibilityHint = "Discards the current voice input and resets Hex"
-        button.addTarget(self, action: #selector(handleCancelButton), for: .touchUpInside)
-        button.isHidden = true
         return button
     }()
 
@@ -210,41 +201,34 @@ final class KeyboardViewController: UIInputViewController,
     }
 
     private func configureLayout() {
-        let actionRow = UIStackView(
-            arrangedSubviews: [statusLabel, cancelButton, dictationButton]
+        let controlRow = UIStackView(
+            arrangedSubviews: [candidateRow, dictationButton]
         )
-        actionRow.axis = .horizontal
-        actionRow.alignment = .center
-        actionRow.spacing = 12
+        controlRow.axis = .horizontal
+        controlRow.alignment = .center
+        controlRow.spacing = 4
 
-        dictationButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 132).isActive = true
-        dictationButton.heightAnchor.constraint(equalToConstant: 42).isActive = true
-        cancelButton.widthAnchor.constraint(equalToConstant: 42).isActive = true
-        cancelButton.heightAnchor.constraint(equalToConstant: 42).isActive = true
+        dictationButton.widthAnchor.constraint(equalToConstant: 38).isActive = true
+        dictationButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        controlRow.heightAnchor.constraint(equalToConstant: 40).isActive = true
 
         let stack = UIStackView(
-            arrangedSubviews: [actionRow, candidateRow, rowsStack]
+            arrangedSubviews: [controlRow, rowsStack]
         )
         stack.axis = .vertical
-        stack.spacing = 8
+        stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
-            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
+            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 4),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -6),
         ])
 
-        let candidateHeightConstraint = candidateRow.heightAnchor.constraint(
-            equalToConstant: 34
-        )
-        candidateHeightConstraint.priority = .defaultHigh
-        candidateHeightConstraint.isActive = true
-
         let heightConstraint = view.heightAnchor.constraint(
-            equalToConstant: swipeToTypeEnabled ? 340 : 298
+            equalToConstant: Self.compactKeyboardHeight
         )
         heightConstraint.priority = .defaultHigh
         heightConstraint.isActive = true
@@ -265,8 +249,7 @@ final class KeyboardViewController: UIInputViewController,
     }
 
     private func updateSwipeToTypeConfiguration() {
-        candidateRow.isHidden = swipeToTypeEnabled == false
-        keyboardHeightConstraint?.constant = swipeToTypeEnabled ? 340 : 298
+        keyboardHeightConstraint?.constant = Self.compactKeyboardHeight
         if swipeToTypeEnabled {
             showGlideCandidates([])
             _ = glideDecoder
@@ -566,12 +549,21 @@ final class KeyboardViewController: UIInputViewController,
         keyButtons.removeAll(keepingCapacity: true)
 
         let rows = page == .letters ? Self.letterRows : Self.numberRows
-        for keys in rows {
+        for (rowIndex, keys) in rows.enumerated() {
             let row = UIStackView()
             row.axis = .horizontal
             row.alignment = .fill
             row.distribution = .fillProportionally
             row.spacing = 6
+            if page == .letters, rowIndex == 1 {
+                row.isLayoutMarginsRelativeArrangement = true
+                row.layoutMargins = UIEdgeInsets(
+                    top: 0,
+                    left: 18,
+                    bottom: 0,
+                    right: 18
+                )
+            }
 
             for key in keys {
                 let button = makeButton(for: key)
@@ -592,7 +584,7 @@ final class KeyboardViewController: UIInputViewController,
         configuration.baseBackgroundColor = backgroundColor(for: key)
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer {
             var attributes = $0
-            attributes.font = .systemFont(ofSize: 20, weight: .regular)
+            attributes.font = .systemFont(ofSize: 22, weight: .regular)
             return attributes
         }
 
@@ -805,7 +797,10 @@ final class KeyboardViewController: UIInputViewController,
                         ? "Stopping…"
                         : "Voice entry cancelled because the original text destination is unavailable"
                 )
-            case .stopRequested, .processing, .cancelRequested:
+            case .stopRequested, .processing:
+                try PrototypeMailbox.requestCancel(id: record.id)
+                refreshState(note: "Cancelling…")
+            case .cancelRequested:
                 renderState(note: status(for: snapshot), snapshot: snapshot)
             case .consumed, .failed:
                 try startDictationOrPromptArm()
@@ -815,27 +810,9 @@ final class KeyboardViewController: UIInputViewController,
         }
     }
 
-    @objc private func handleCancelButton() {
-        guard hasFullAccess else {
-            renderState(note: "Allow Full Access in Settings")
-            return
-        }
-
-        do {
-            guard let record = try PrototypeMailbox.current() else {
-                refreshState(note: "Voice input reset")
-                return
-            }
-            try PrototypeMailbox.requestCancel(id: record.id)
-            refreshState(note: "Cancelling…")
-        } catch {
-            renderIPCFailure(error)
-        }
-    }
-
     private func startDictationOrPromptArm() throws(PrototypeIPCError) {
         guard try PrototypeWarmSession.current()?.isReady() == true else {
-            renderState(note: "Hold the Action Button to Arm Hex")
+            renderState(note: "Voice unavailable")
             return
         }
 
@@ -954,12 +931,12 @@ final class KeyboardViewController: UIInputViewController,
         let warmSessionReady = snapshot.warmSession?.isReady() == true
         guard let record = snapshot.mailbox else {
             return warmSessionReady
-                ? "Voice ready • tap Start Voice"
-                : "Hold the Action Button to Arm Hex"
+                ? "Voice ready"
+                : "Voice unavailable"
         }
         return switch record.state {
-        case .captureRequested: "Starting • tap Stop to cancel"
-        case .capturing: "Recording • tap Stop here"
+        case .captureRequested: "Starting"
+        case .capturing: "Recording"
         case .stopRequested: "Stopping recording…"
         case .cancelRequested: "Cancelling voice entry…"
         case .processing: "Ronin is transcribing…"
@@ -969,9 +946,9 @@ final class KeyboardViewController: UIInputViewController,
                Date().timeIntervalSince(insertedAt) < 2 {
                 "Transcript inserted"
             } else if warmSessionReady {
-                "Voice ready • tap Start Voice"
+                "Voice ready"
             } else {
-                "Hold the Action Button to Arm Hex"
+                "Voice unavailable"
             }
         case .failed: record.errorMessage ?? "Dictation failed"
         }
@@ -993,13 +970,14 @@ final class KeyboardViewController: UIInputViewController,
         note: String,
         snapshot: PrototypeIPCSnapshot? = nil
     ) {
-        statusLabel.text = note
+        dictationButton.accessibilityValue = note
 
         guard hasFullAccess else {
-            cancelButton.isHidden = true
-            dictationButton.configuration?.title = "Full Access Required"
-            dictationButton.configuration?.image = UIImage(systemName: "lock.fill")
-            dictationButton.isEnabled = true
+            updateVoiceButton(
+                color: .systemGray,
+                isEnabled: true,
+                accessibilityLabel: "Allow Full Access for Hex Voice"
+            )
             return
         }
 
@@ -1008,50 +986,57 @@ final class KeyboardViewController: UIInputViewController,
         let warmSessionReady = snapshot?.warmSession?.isReady() == true
         switch record?.state {
         case .captureRequested, .capturing:
-            cancelButton.isHidden = false
-            cancelButton.isEnabled = true
-            dictationButton.configuration?.image = UIImage(systemName: "stop.fill")
-            dictationButton.configuration?.title = "Stop Voice"
-            dictationButton.configuration?.baseBackgroundColor = .systemRed
-            dictationButton.isEnabled = true
+            updateVoiceButton(
+                color: .systemRed,
+                isEnabled: true,
+                accessibilityLabel: "Stop Hex Voice"
+            )
         case .stopRequested, .processing:
-            cancelButton.isHidden = false
-            cancelButton.isEnabled = true
-            dictationButton.configuration?.image = UIImage(systemName: "waveform")
-            dictationButton.configuration?.title = "Sending…"
-            dictationButton.configuration?.baseBackgroundColor = .systemBlue
-            dictationButton.isEnabled = false
+            updateVoiceButton(
+                color: .systemOrange,
+                isEnabled: true,
+                accessibilityLabel: "Cancel Hex Voice processing"
+            )
         case .cancelRequested:
-            cancelButton.isHidden = false
-            cancelButton.isEnabled = false
-            dictationButton.configuration?.image = UIImage(systemName: "xmark")
-            dictationButton.configuration?.title = "Cancelling…"
-            dictationButton.configuration?.baseBackgroundColor = .systemOrange
-            dictationButton.isEnabled = false
+            updateVoiceButton(
+                color: .systemOrange,
+                isEnabled: false,
+                accessibilityLabel: "Cancelling Hex Voice"
+            )
         case .completed:
-            cancelButton.isHidden = false
-            cancelButton.isEnabled = true
             if let record, isCurrentTextDestination(for: record) {
-                dictationButton.configuration?.image = UIImage(systemName: "arrow.down.to.line")
-                dictationButton.configuration?.title = "Insert Transcript"
-                dictationButton.configuration?.baseBackgroundColor = .systemBlue
+                updateVoiceButton(
+                    color: .systemBlue,
+                    isEnabled: true,
+                    accessibilityLabel: "Insert Hex Voice transcript"
+                )
             } else {
-                dictationButton.configuration?.image = UIImage(systemName: "trash")
-                dictationButton.configuration?.title = "Discard Pending"
-                dictationButton.configuration?.baseBackgroundColor = .systemOrange
+                updateVoiceButton(
+                    color: .systemOrange,
+                    isEnabled: true,
+                    accessibilityLabel: "Discard Hex Voice transcript"
+                )
             }
-            dictationButton.isEnabled = true
         case .consumed, .failed, nil:
-            cancelButton.isHidden = true
-            dictationButton.configuration?.image = UIImage(systemName: "mic.fill")
-            dictationButton.configuration?.baseBackgroundColor = .systemBlue
-            if warmSessionReady {
-                dictationButton.configuration?.title = "Start Voice"
-            } else {
-                dictationButton.configuration?.title = "Arm with Action Button"
-            }
-            dictationButton.isEnabled = true
+            updateVoiceButton(
+                color: .systemBlue,
+                isEnabled: true,
+                accessibilityLabel: warmSessionReady ? "Start Hex Voice" : "Hex Voice"
+            )
         }
+    }
+
+    private func updateVoiceButton(
+        color: UIColor,
+        isEnabled: Bool,
+        accessibilityLabel: String
+    ) {
+        dictationButton.configuration?.image = Self.hexVoiceImage
+        dictationButton.configuration?.title = nil
+        dictationButton.configuration?.baseForegroundColor = .white
+        dictationButton.configuration?.baseBackgroundColor = color
+        dictationButton.accessibilityLabel = accessibilityLabel
+        dictationButton.isEnabled = isEnabled
     }
 
     private func isCurrentTextDestination(for record: PrototypeMailboxRecord) -> Bool {
@@ -1089,10 +1074,11 @@ final class KeyboardViewController: UIInputViewController,
     private func renderIPCFailure(_: PrototypeIPCError) {
         latestSnapshot = nil
         HexLog.app.error("Keyboard extension IPC failed")
-        statusLabel.text = "Hex keyboard state unavailable"
-        dictationButton.configuration?.image = UIImage(systemName: "exclamationmark.triangle.fill")
-        dictationButton.configuration?.title = "Reopen Hex"
-        dictationButton.configuration?.baseBackgroundColor = .systemOrange
-        dictationButton.isEnabled = false
+        dictationButton.accessibilityValue = "Hex keyboard state unavailable"
+        updateVoiceButton(
+            color: .systemOrange,
+            isEnabled: false,
+            accessibilityLabel: "Hex Voice unavailable"
+        )
     }
 }
