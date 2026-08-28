@@ -46,6 +46,40 @@ Open the generated project with:
 make open
 ```
 
+## Experimental swipe typing
+
+The containing app now has a **Keyboard → Swipe to Type (Experimental)**
+toggle. It is off by default. After enabling it, return to a text field and
+reselect Hex if the keyboard was already visible.
+
+With the setting on:
+
+- draw across the letter keys to decode one English word entirely on-device;
+- Hex inserts the first-ranked word plus a space and shows three candidates;
+- tap another candidate to replace only the last committed glide word;
+- short touches remain normal key taps, and number/symbol typing is unchanged;
+- the existing Start Voice, Stop Voice, Cancel, and transcript-insertion flow
+  remains in the top action row.
+
+The prototype bundles a deterministic 20,000-entry SymSpell-derived frequency
+resource. Run `make glide-lexicon` to regenerate it from the pinned source and
+verify its checksum. Provenance, licenses, and the public-App-Store caveat are
+documented in
+[`docs/research/ios-glide-typing-word-frequency-source.md`](../../docs/research/ios-glide-typing-word-frequency-source.md)
+and bundled beside the resource.
+
+For a shareable, non-production walkthrough of the decoder interaction, open
+`ios/Keyboard/Prototypes/GlideDecoderPrototype.html` directly in a browser.
+The Swift decoder's checked-in tests use idealized paths only. A Debug device
+build logs each selected word and normalized path with private unified-log
+fields so a small real-iPhone fixture corpus can be collected without adding
+cloud telemetry.
+
+Do not call this QuickPath-equivalent yet. Before promoting it beyond the
+personal prototype, issue #12 still requires real-iPhone top-three accuracy,
+decode-latency and extension-memory baselines, explicit regression limits based
+on those measurements, and a public-distribution license decision.
+
 `make validate` regenerates the project, type-checks both Swift 6 targets, runs the bounded-capture unit suite, transactional App Group smoke suite, and authenticated server smoke suite, and verifies the background-audio, keyboard Full Access, and matching App Group declarations.
 
 ## Ronin service

@@ -1,7 +1,10 @@
-.PHONY: generate typecheck test-ios smoke-capture-storage smoke-mailbox smoke-server validate build build-release build-device-release open clean server server-configure server-rotate server-device-enroll server-device-list server-device-rotate server-device-revoke server-backup server-restore server-restore-finalize server-restore-reauthorize server-restore-auth-reset server-restore-auth-complete server-storage-drill server-status server-logs server-stop server-fake server-health server-latency
+.PHONY: generate glide-lexicon typecheck test-ios smoke-capture-storage smoke-mailbox smoke-server validate build build-release build-device-release open clean server server-configure server-rotate server-device-enroll server-device-list server-device-rotate server-device-revoke server-backup server-restore server-restore-finalize server-restore-reauthorize server-restore-auth-reset server-restore-auth-complete server-storage-drill server-status server-logs server-stop server-fake server-health server-latency
 
 generate:
 	cd ios && xcodegen generate
+
+glide-lexicon:
+	./generate-glide-lexicon.sh
 
 typecheck:
 	xcrun swiftc -typecheck \
@@ -82,6 +85,11 @@ validate: generate typecheck test-ios smoke-capture-storage smoke-mailbox smoke-
 	test "$$('/usr/libexec/PlistBuddy' -c 'Print :NSExtension:NSExtensionAttributes:RequestsOpenAccess' ios/Keyboard/Info.plist)" = true
 	test "$$('/usr/libexec/PlistBuddy' -c 'Print :com.apple.security.application-groups:0' ios/App/HexKeyboardTracer.entitlements)" = group.com.nmarch213.HexKeyboardTracer
 	test "$$('/usr/libexec/PlistBuddy' -c 'Print :com.apple.security.application-groups:0' ios/Keyboard/HexKeyboardExtension.entitlements)" = group.com.nmarch213.HexKeyboardTracer
+	test "$$(awk '!/^#/ { count += 1 } END { print count }' ios/Keyboard/Resources/english-glide-frequency.txt)" = 20000
+	cd ios/Keyboard/Resources && shasum -a 256 -c english-glide-frequency.txt.sha256
+	test -s ios/Keyboard/Resources/GlideLexiconNotices/SymSpell-MIT.txt
+	test -s ios/Keyboard/Resources/GlideLexiconNotices/SCOWL-v1-Copyright.txt
+	test -s ios/Keyboard/Resources/GlideLexiconNotices/CC-BY-3.0.txt
 
 build: generate
 	xcodebuild \

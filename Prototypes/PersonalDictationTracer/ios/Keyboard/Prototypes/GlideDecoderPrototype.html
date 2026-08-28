@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hex Glide Decoder Prototype</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --accent: #315efb;
+      --background: #f4f5f8;
+      --panel: rgba(255, 255, 255, 0.92);
+      --key: #fff;
+      --ink: #17191d;
+      --muted: #686d78;
+      --line: #d9dce4;
+      --special: #d8dbe2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: #17181b;
+        --panel: rgba(39, 41, 46, 0.94);
+        --key: #4a4d54;
+        --ink: #f7f7f8;
+        --muted: #b1b4bd;
+        --line: #4b4e56;
+        --special: #34373d;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--background);
+      color: var(--ink);
+      font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    }
+    main { width: min(980px, 100%); margin: 0 auto; padding: 32px 18px 52px; }
+    h1 { margin: 0 0 8px; font-size: clamp(28px, 5vw, 42px); letter-spacing: -0.035em; }
+    h2 { margin: 0 0 14px; font-size: 17px; }
+    p { margin: 0; }
+    .intro { max-width: 760px; color: var(--muted); }
+    .prototype-mark {
+      display: inline-block;
+      margin-bottom: 14px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(260px, .85fr); gap: 18px; margin-top: 26px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 18px; box-shadow: 0 10px 35px rgba(15, 20, 35, .08); }
+    .output {
+      min-height: 76px;
+      margin-bottom: 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--background);
+      font-size: 20px;
+      white-space: pre-wrap;
+    }
+    .voice-row, .candidate-row, .free-play { display: flex; gap: 8px; }
+    .voice-row { align-items: center; margin-bottom: 10px; }
+    .voice-status { flex: 1; color: var(--muted); font-size: 13px; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--key);
+      color: var(--ink);
+      padding: 9px 12px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent), transparent 65%); outline-offset: 2px; }
+    .primary { background: var(--accent); border-color: var(--accent); color: white; font-weight: 650; }
+    .candidate-row { height: 38px; margin-bottom: 8px; }
+    .candidate-row button { flex: 1; padding: 6px; font-weight: 650; }
+    .candidate-row button:empty { visibility: hidden; }
+    .keyboard { position: relative; touch-action: none; user-select: none; -webkit-user-select: none; }
+    .key-row { display: flex; gap: 6px; margin-top: 7px; }
+    .key-row:nth-child(2) { padding-inline: 5%; }
+    .key-row:nth-child(3) { padding-inline: 12%; }
+    .key {
+      flex: 1;
+      height: 46px;
+      padding: 0;
+      border: 0;
+      border-radius: 7px;
+      box-shadow: 0 1px 0 rgba(0, 0, 0, .22);
+      font-size: 20px;
+      pointer-events: none;
+    }
+    #trail { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+    #trailPath { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: .78; }
+    dl { display: grid; grid-template-columns: minmax(100px, .6fr) minmax(0, 1.4fr); gap: 9px 12px; margin: 0; }
+    dt { color: var(--muted); }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    .free-play { flex-wrap: wrap; margin-top: 18px; }
+    .free-play button { font-size: 13px; }
+    .walkthroughs { margin-top: 18px; }
+    .tabs { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 12px; }
+    .tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: white; }
+    .scenario { display: none; }
+    .scenario.active { display: block; }
+    .scenario p { color: var(--muted); margin-bottom: 10px; }
+    .steps { display: grid; gap: 8px; }
+    .steps button { text-align: left; }
+    .note { margin-top: 16px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 760px) {
+      main { padding: 22px 10px 38px; }
+      .layout { grid-template-columns: 1fr; }
+      .panel { padding: 13px; border-radius: 14px; }
+      .key { height: 44px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="prototype-mark">Throwaway logic prototype</span>
+    <h1>Hex swipe typing, beside voice</h1>
+    <p class="intro">
+      Question: can a small, entirely on-device one-word glide decoder share Hex’s existing keyboard with reliable tap typing, visible correction candidates, and an independent voice control? Draw across the letters or use the guided cases below. This deliberately tests the interaction and ranking shape, not Apple QuickPath parity.
+    </p>
+
+    <div class="layout">
+      <section class="panel" aria-labelledby="keyboardTitle">
+        <h2 id="keyboardTitle">Try the keyboard</h2>
+        <div class="output" id="output" aria-live="polite"></div>
+        <div class="voice-row">
+          <span class="voice-status" id="voiceStatus">Voice ready</span>
+          <button class="primary" id="voiceButton">Start Voice</button>
+        </div>
+        <div class="candidate-row" id="candidates" aria-label="Glide candidates"></div>
+        <div class="keyboard" id="keyboard" aria-label="Prototype keyboard">
+          <svg id="trail" aria-hidden="true"><path id="trailPath"></path></svg>
+          <div class="key-row" data-row="0"></div>
+          <div class="key-row" data-row="1"></div>
+          <div class="key-row" data-row="2"></div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="stateTitle">
+        <h2 id="stateTitle">Current state</h2>
+        <dl>
+          <dt>Swipe setting</dt><dd id="stateEnabled"></dd>
+          <dt>Last input</dt><dd id="stateInput"></dd>
+          <dt>Crossed keys</dt><dd id="stateSignature"></dd>
+          <dt>Candidates</dt><dd id="stateCandidates"></dd>
+          <dt>Committed text</dt><dd id="stateText"></dd>
+          <dt>Voice</dt><dd id="stateVoice"></dd>
+          <dt>Result</dt><dd id="stateNote"></dd>
+        </dl>
+
+        <div class="free-play" aria-label="Free play actions">
+          <button data-action="toggle">Toggle swipe</button>
+          <button data-action="hello">Swipe “hello”</button>
+          <button data-action="there">Swipe “there”</button>
+          <button data-action="short">Short tap</button>
+          <button data-action="clear">Clear</button>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel walkthroughs" aria-labelledby="walkthroughTitle">
+      <h2 id="walkthroughTitle">Guided walkthroughs</h2>
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="happy">Happy path</button>
+        <button role="tab" aria-selected="false" data-tab="ambiguous">Ambiguous word</button>
+        <button role="tab" aria-selected="false" data-tab="tap">Too short</button>
+        <button role="tab" aria-selected="false" data-tab="voice">Voice remains separate</button>
+      </div>
+      <div class="scenario active" id="happy">
+        <p>A normal glide commits the first-ranked word and keeps alternatives available.</p>
+        <div class="steps">
+          <button data-action="ensureOn">1. Enable Swipe to Type</button>
+          <button data-action="hello">2. Glide from H through E and L to O</button>
+        </div>
+      </div>
+      <div class="scenario" id="ambiguous">
+        <p>A similar path can rank more than one plausible word. The candidate row repairs only the last glide commit.</p>
+        <div class="steps">
+          <button data-action="there">1. Glide “there”</button>
+          <button data-action="secondCandidate">2. Choose the second candidate</button>
+        </div>
+      </div>
+      <div class="scenario" id="tap">
+        <p>A movement below the glide threshold remains an ordinary key tap.</p>
+        <div class="steps">
+          <button data-action="short">1. Touch and move slightly on T</button>
+        </div>
+      </div>
+      <div class="scenario" id="voice">
+        <p>The voice state changes without clearing typed text or competing for the letter gesture surface.</p>
+        <div class="steps">
+          <button data-action="voice">1. Start Voice</button>
+          <button data-action="voice">2. Stop Voice</button>
+        </div>
+      </div>
+    </section>
+
+    <p class="note">
+      The embedded list is intentionally tiny. A shippable experiment still needs a licensed 5k–20k frequency list, real iPhone path fixtures, and measured extension latency and memory.
+    </p>
+  </main>
+
+  <script>
+    const GlidePrototype = (() => {
+      const rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+      const commonWords = `the of and to a in is you that it he was for on are as with his they I at be this have from or one had by word but not what all were we when your can said there use an each which she do how their if will up other about out many then them these so some her would make like him into time has look two more write go see number no way could people my than first water been call who oil its now find long down day did get come made may part hello help here house home hope horse hot how however huge human hundred husband idea if important improve include increase inside instead interest into issue it its just keep key keyboard kind know large last later learn leave left less let life light like line little live local long look love made make man many map matter may me mean message might model money month more most move much must my name near need never new next night no not nothing now number of off often old on once one only open or other our out over own part people phone place plan play point possible power pretty probably product project put question quick read real really remember right run same say school search see send sentence set should show simple since slide small smart so software some something sound space start state still stop such sure system take talk teach tell test text than that the their them then there these they thing think this those three through time to today together tool try two type typing under up us use user very voice wait want way we well were what when where which while who why will with word work world would write year yes you your`.toLowerCase().split(/\s+/);
+      const dictionary = [...new Set(commonWords)].map((word, rank) => ({ word, rank: rank + 1 }));
+
+      const initialState = () => ({
+        enabled: false,
+        lastInput: "None",
+        signature: [],
+        candidates: [],
+        text: "",
+        lastCommit: null,
+        voice: "ready",
+        note: "Enable Swipe to Type, then draw across the letters."
+      });
+
+      const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const pathLength = points => points.slice(1).reduce((sum, point, index) => sum + distance(points[index], point), 0);
+
+      function simplify(points, minimumDistance) {
+        if (!points.length) return [];
+        const result = [points[0]];
+        for (const point of points.slice(1)) {
+          if (distance(point, result[result.length - 1]) >= minimumDistance) result.push(point);
+        }
+        if (result[result.length - 1] !== points[points.length - 1]) result.push(points[points.length - 1]);
+        return result;
+      }
+
+      function resample(points, count) {
+        if (points.length < 2) return points;
+        const total = pathLength(points);
+        if (!total) return Array.from({ length: count }, () => points[0]);
+        const step = total / (count - 1);
+        const result = [points[0]];
+        let remaining = step;
+        let previous = points[0];
+        let index = 1;
+        while (index < points.length && result.length < count) {
+          const current = points[index];
+          const segment = distance(previous, current);
+          if (segment >= remaining) {
+            const ratio = remaining / Math.max(segment, 1e-9);
+            previous = { x: previous.x + (current.x - previous.x) * ratio, y: previous.y + (current.y - previous.y) * ratio };
+            result.push(previous);
+            remaining = step;
+          } else {
+            remaining -= segment;
+            previous = current;
+            index += 1;
+          }
+        }
+        while (result.length < count) result.push(points[points.length - 1]);
+        return result;
+      }
+
+      function collapsedLetters(word) {
+        return [...word].filter((letter, index, letters) => index === 0 || letter !== letters[index - 1]);
+      }
+
+      function nearestLetter(point, centers) {
+        return Object.entries(centers).reduce((best, [letter, center]) => {
+          const candidate = { letter, distance: distance(point, center) };
+          return !best || candidate.distance < best.distance ? candidate : best;
+        }, null)?.letter;
+      }
+
+      function signatureFor(points, centers) {
+        return points.map(point => nearestLetter(point, centers)).filter((letter, index, letters) => letter && letter !== letters[index - 1]);
+      }
+
+      function editDistance(left, right) {
+        const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+        for (let row = 1; row <= left.length; row += 1) {
+          let diagonal = previous[0];
+          previous[0] = row;
+          for (let column = 1; column <= right.length; column += 1) {
+            const above = previous[column];
+            previous[column] = Math.min(
+              previous[column] + 1,
+              previous[column - 1] + 1,
+              diagonal + (left[row - 1] === right[column - 1] ? 0 : 1)
+            );
+            diagonal = above;
+          }
+        }
+        return previous[right.length];
+      }
+
+      function averageKeySpacing(centers) {
+        return rows.flatMap(row => [...row].slice(1).map((letter, index) => distance(centers[row[index]], centers[letter])))
+          .reduce((sum, value, _, values) => sum + value / values.length, 0);
+      }
+
+      function decode(points, centers, limit = 3) {
+        const spacing = averageKeySpacing(centers);
+        const cleaned = simplify(points, spacing * 0.12);
+        if (pathLength(cleaned) < spacing * 0.7) return { kind: "tap", letter: nearestLetter(cleaned[0], centers), signature: [] };
+        const signature = signatureFor(cleaned, centers);
+        const sampledPath = resample(cleaned, 28);
+        const scored = dictionary.flatMap(entry => {
+          const letters = collapsedLetters(entry.word);
+          const template = letters.map(letter => centers[letter]).filter(Boolean);
+          if (template.length !== letters.length || template.length < 2) return [];
+          const endpoint = (distance(cleaned[0], template[0]) + distance(cleaned[cleaned.length - 1], template[template.length - 1])) / spacing;
+          if (endpoint > 2.4) return [];
+          const sampledTemplate = resample(template, 28);
+          const shape = sampledPath.reduce((sum, point, index) => sum + distance(point, sampledTemplate[index]) / spacing, 0) / sampledPath.length;
+          const sequence = editDistance(signature, letters) / Math.max(signature.length, letters.length, 1);
+          const frequency = Math.log1p(entry.rank) / Math.log1p(dictionary.length);
+          const score = endpoint * 2.8 + shape * 1.8 + sequence * 1.5 + frequency * 0.28;
+          return [{ word: entry.word, score }];
+        }).sort((left, right) => left.score - right.score).slice(0, limit);
+        return { kind: scored.length ? "glide" : "ambiguous", signature, candidates: scored };
+      }
+
+      function staticCenters() {
+        const offsets = [0, 0.5, 1.5];
+        return Object.fromEntries(rows.flatMap((row, y) => [...row].map((letter, x) => [letter, { x: x + offsets[y], y }] )));
+      }
+
+      function templatePath(word, centers = staticCenters()) {
+        const template = collapsedLetters(word).map(letter => centers[letter]);
+        return template.flatMap((point, index) => {
+          if (!index) return [point];
+          const previous = template[index - 1];
+          return [0.25, 0.5, 0.75, 1].map(ratio => ({ x: previous.x + (point.x - previous.x) * ratio, y: previous.y + (point.y - previous.y) * ratio }));
+        });
+      }
+
+      function reduce(state, action) {
+        if (action.type === "reset") return initialState();
+        if (action.type === "setEnabled") return { ...state, enabled: action.value, candidates: [], lastCommit: null, note: action.value ? "Swipe decoding is on." : "Swipe decoding is off; tap and voice still work." };
+        if (action.type === "voice") {
+          const voice = state.voice === "ready" ? "recording" : "ready";
+          return { ...state, voice, lastInput: "Voice control", note: voice === "recording" ? "Voice started independently of swipe typing." : "Voice stopped; typed text was preserved." };
+        }
+        if (action.type === "choose") {
+          const candidate = state.candidates[action.index];
+          if (!candidate || !state.lastCommit) return { ...state, note: "There is no glide word to replace." };
+          const prefix = state.text.slice(0, -state.lastCommit.length);
+          const inserted = candidate.word + " ";
+          return { ...state, text: prefix + inserted, lastCommit: inserted, lastInput: `Candidate “${candidate.word}”`, note: "Only the last glide word was replaced." };
+        }
+        if (action.type === "tap") {
+          return { ...state, text: state.text + action.letter, candidates: [], lastCommit: null, signature: [], lastInput: `Tap “${action.letter}”`, note: "Ordinary tap typing remains available." };
+        }
+        if (action.type === "gesture") {
+          if (!state.enabled) return { ...state, lastInput: "Swipe ignored", note: "Swipe decoding is off; enable the setting to try this path." };
+          const result = decode(action.points, action.centers);
+          if (result.kind === "tap") return reduce(state, { type: "tap", letter: result.letter });
+          if (result.kind !== "glide") return { ...state, lastInput: "Ambiguous glide", signature: result.signature, candidates: [], lastCommit: null, note: "No word was committed; tap and voice remain available." };
+          const inserted = result.candidates[0].word + " ";
+          return {
+            ...state,
+            text: state.text + inserted,
+            lastCommit: inserted,
+            candidates: result.candidates,
+            signature: result.signature,
+            lastInput: "Glide gesture",
+            note: `Committed “${result.candidates[0].word}”; alternatives can replace it.`
+          };
+        }
+        return state;
+      }
+
+      return { initialState, reduce, staticCenters, templatePath };
+    })();
+
+    const rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+    const keyboard = document.querySelector("#keyboard");
+    rows.forEach((letters, index) => {
+      const row = keyboard.querySelector(`[data-row="${index}"]`);
+      [...letters].forEach(letter => {
+        const key = document.createElement("button");
+        key.className = "key";
+        key.dataset.letter = letter;
+        key.textContent = letter;
+        row.append(key);
+      });
+    });
+
+    let state = GlidePrototype.initialState();
+    let pointerPath = [];
+
+    function centersFromKeyboard() {
+      const keyboardRect = keyboard.getBoundingClientRect();
+      return Object.fromEntries([...keyboard.querySelectorAll(".key")].map(key => {
+        const rect = key.getBoundingClientRect();
+        return [key.dataset.letter, { x: rect.left + rect.width / 2 - keyboardRect.left, y: rect.top + rect.height / 2 - keyboardRect.top }];
+      }));
+    }
+
+    function render() {
+      document.querySelector("#output").textContent = state.text || "Tap or glide to enter text…";
+      document.querySelector("#voiceStatus").textContent = state.voice === "recording" ? "Recording voice…" : "Voice ready";
+      document.querySelector("#voiceButton").textContent = state.voice === "recording" ? "Stop Voice" : "Start Voice";
+      document.querySelector("#stateEnabled").textContent = state.enabled ? "On" : "Off";
+      document.querySelector("#stateInput").textContent = state.lastInput;
+      document.querySelector("#stateSignature").textContent = state.signature.join(" → ") || "None";
+      document.querySelector("#stateCandidates").textContent = state.candidates.map(candidate => `${candidate.word} (${candidate.score.toFixed(2)})`).join(", ") || "None";
+      document.querySelector("#stateText").textContent = state.text || "Empty";
+      document.querySelector("#stateVoice").textContent = state.voice === "recording" ? "Recording" : "Ready";
+      document.querySelector("#stateNote").textContent = state.note;
+      const candidateRow = document.querySelector("#candidates");
+      candidateRow.replaceChildren();
+      for (let index = 0; index < 3; index += 1) {
+        const button = document.createElement("button");
+        button.textContent = state.candidates[index]?.word ?? "";
+        button.addEventListener("click", () => dispatch({ type: "choose", index }));
+        candidateRow.append(button);
+      }
+    }
+
+    function dispatch(action) {
+      state = GlidePrototype.reduce(state, action);
+      render();
+    }
+
+    function drawTrail(points) {
+      document.querySelector("#trailPath").setAttribute("d", points.map((point, index) => `${index ? "L" : "M"} ${point.x} ${point.y}`).join(" "));
+    }
+
+    keyboard.addEventListener("pointerdown", event => {
+      keyboard.setPointerCapture(event.pointerId);
+      const rect = keyboard.getBoundingClientRect();
+      pointerPath = [{ x: event.clientX - rect.left, y: event.clientY - rect.top }];
+      drawTrail(pointerPath);
+    });
+    keyboard.addEventListener("pointermove", event => {
+      if (!pointerPath.length) return;
+      const rect = keyboard.getBoundingClientRect();
+      pointerPath.push({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+      drawTrail(pointerPath);
+    });
+    keyboard.addEventListener("pointerup", event => {
+      if (!pointerPath.length) return;
+      keyboard.releasePointerCapture(event.pointerId);
+      const points = pointerPath;
+      pointerPath = [];
+      dispatch({ type: "gesture", points, centers: centersFromKeyboard() });
+      setTimeout(() => drawTrail([]), 180);
+    });
+    keyboard.addEventListener("pointercancel", () => { pointerPath = []; drawTrail([]); });
+
+    document.querySelector("#voiceButton").addEventListener("click", () => dispatch({ type: "voice" }));
+
+    function runAction(name) {
+      const centers = GlidePrototype.staticCenters();
+      if (name === "toggle") dispatch({ type: "setEnabled", value: !state.enabled });
+      if (name === "ensureOn") dispatch({ type: "setEnabled", value: true });
+      if (name === "clear") dispatch({ type: "reset" });
+      if (["hello", "there", "short"].includes(name) && !state.enabled) {
+        dispatch({ type: "setEnabled", value: true });
+      }
+      if (name === "hello" || name === "there") dispatch({ type: "gesture", points: GlidePrototype.templatePath(name, centers), centers });
+      if (name === "short") dispatch({ type: "gesture", points: [{ ...centers.t }, { x: centers.t.x + 0.15, y: centers.t.y + 0.05 }], centers });
+      if (name === "secondCandidate") dispatch({ type: "choose", index: 1 });
+      if (name === "voice") dispatch({ type: "voice" });
+    }
+
+    document.querySelectorAll("[data-action]").forEach(button => button.addEventListener("click", () => runAction(button.dataset.action)));
+    document.querySelectorAll("[data-tab]").forEach(tab => tab.addEventListener("click", () => {
+      document.querySelectorAll("[data-tab]").forEach(item => item.setAttribute("aria-selected", String(item === tab)));
+      document.querySelectorAll(".scenario").forEach(item => item.classList.toggle("active", item.id === tab.dataset.tab));
+      dispatch({ type: "reset" });
+    }));
+
+    render();
+  </script>
+</body>
+</html>
