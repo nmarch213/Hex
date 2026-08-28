@@ -107,13 +107,34 @@ final class KeyboardViewController: UIInputViewController,
 
     var enableInputClicksWhenVisible: Bool { true }
 
-    private static let compactKeyboardHeight: CGFloat = 274
+    private static let compactKeyboardHeight: CGFloat = 268
 
-    private static let hexVoiceImage = UIImage(
-        named: "HexIcon",
-        in: Bundle(for: KeyboardViewController.self),
-        compatibleWith: nil
-    )?.withRenderingMode(.alwaysTemplate) ?? UIImage(systemName: "hexagon")
+    private static let standardKeyBackground = UIColor { traits in
+        traits.userInterfaceStyle == .dark ? .systemGray3 : .white
+    }
+
+    private static let utilityKeyBackground = UIColor { traits in
+        traits.userInterfaceStyle == .dark ? .systemGray3 : .systemGray4
+    }
+
+    private static let hexVoiceImage: UIImage = {
+        let fallback = UIImage(systemName: "hexagon") ?? UIImage()
+        guard let source = UIImage(
+            named: "HexIcon",
+            in: Bundle(for: KeyboardViewController.self),
+            compatibleWith: nil
+        ) else {
+            return fallback
+        }
+
+        let size = CGSize(width: 18, height: 20)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { _ in
+            source.withRenderingMode(.alwaysOriginal).draw(
+                in: CGRect(origin: .zero, size: size)
+            )
+        }.withRenderingMode(.alwaysTemplate)
+    }()
 
     private lazy var dictationButton: UIButton = {
         var configuration = UIButton.Configuration.filled()
@@ -122,10 +143,10 @@ final class KeyboardViewController: UIInputViewController,
         configuration.baseForegroundColor = .white
         configuration.baseBackgroundColor = .systemBlue
         configuration.contentInsets = NSDirectionalEdgeInsets(
-            top: 7,
-            leading: 7,
-            bottom: 7,
-            trailing: 7
+            top: 4,
+            leading: 6,
+            bottom: 4,
+            trailing: 6
         )
 
         let button = UIButton(configuration: configuration)
@@ -147,8 +168,9 @@ final class KeyboardViewController: UIInputViewController,
     private let candidateRow: UIStackView = {
         let stack = UIStackView()
         stack.axis = .horizontal
-        stack.spacing = 6
-        stack.distribution = .fillEqually
+        stack.alignment = .center
+        stack.spacing = 0
+        stack.distribution = .fill
         return stack
     }()
 
@@ -208,9 +230,9 @@ final class KeyboardViewController: UIInputViewController,
         controlRow.alignment = .center
         controlRow.spacing = 4
 
-        dictationButton.widthAnchor.constraint(equalToConstant: 38).isActive = true
-        dictationButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
-        controlRow.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        dictationButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        dictationButton.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        controlRow.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
         let stack = UIStackView(
             arrangedSubviews: [controlRow, rowsStack]
@@ -407,6 +429,7 @@ final class KeyboardViewController: UIInputViewController,
             view.removeFromSuperview()
         }
 
+        var firstButton: UIButton?
         for index in 0..<3 {
             var configuration = UIButton.Configuration.plain()
             configuration.baseForegroundColor = .label
@@ -426,6 +449,20 @@ final class KeyboardViewController: UIInputViewController,
                 self?.replaceLastGlideWord(with: index)
             }, for: .touchUpInside)
             candidateRow.addArrangedSubview(button)
+
+            if let firstButton {
+                button.widthAnchor.constraint(equalTo: firstButton.widthAnchor).isActive = true
+            } else {
+                firstButton = button
+            }
+
+            if index < 2 {
+                let separator = UIView()
+                separator.backgroundColor = .separator
+                separator.widthAnchor.constraint(equalToConstant: 0.5).isActive = true
+                separator.heightAnchor.constraint(equalToConstant: 22).isActive = true
+                candidateRow.addArrangedSubview(separator)
+            }
         }
     }
 
@@ -688,7 +725,7 @@ final class KeyboardViewController: UIInputViewController,
                     systemName: shiftState == .capsLock ? "capslock.fill" : "shift.fill"
                 )
                 button.configuration?.baseBackgroundColor = shiftState == .lowercase
-                    ? .tertiarySystemFill
+                    ? Self.utilityKeyBackground
                     : .systemBackground
             case .delete:
                 button.configuration?.image = UIImage(systemName: "delete.left.fill")
@@ -728,11 +765,11 @@ final class KeyboardViewController: UIInputViewController,
     private func backgroundColor(for key: Key) -> UIColor {
         switch key {
         case .character, .space:
-            .systemBackground
+            Self.standardKeyBackground
         case .returnKey:
             .systemBlue
         default:
-            .tertiarySystemFill
+            Self.utilityKeyBackground
         }
     }
 
