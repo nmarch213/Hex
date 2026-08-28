@@ -63,6 +63,7 @@ final class KeyboardViewController: UIInputViewController,
     private var shiftState = ShiftState.lowercase
     private var lastShiftTap: Date?
     private var keyButtons: [(key: Key, button: UIButton)] = []
+    private var deleteRepeatTask: Task<Void, Never>?
     private var statePollingTask: Task<Void, Never>?
     private var latestSnapshot: PrototypeIPCSnapshot?
     private var swipeToTypeEnabled = false
@@ -158,6 +159,11 @@ final class KeyboardViewController: UIInputViewController,
         withConfiguration: voiceActionSymbolConfiguration
     )
 
+    private static let unavailableVoiceImage = UIImage(
+        systemName: "mic.slash.fill",
+        withConfiguration: voiceActionSymbolConfiguration
+    )
+
     private lazy var dictationButton: UIButton = {
         var configuration = UIButton.Configuration.filled()
         configuration.cornerStyle = .medium
@@ -228,6 +234,7 @@ final class KeyboardViewController: UIInputViewController,
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        stopDeleteRepeat()
         statePollingTask?.cancel()
         statePollingTask = nil
         clearGlideCandidates()
@@ -689,7 +696,16 @@ final class KeyboardViewController: UIInputViewController,
                 for: .allTouchEvents
             )
         case .delete:
-            button.addTarget(self, action: #selector(deleteBackward), for: .touchDown)
+            button.addTarget(
+                self,
+                action: #selector(startDeleteRepeat),
+                for: .touchDown
+            )
+            button.addTarget(
+                self,
+                action: #selector(stopDeleteRepeat),
+                for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit]
+            )
         default:
             button.addAction(UIAction { [weak self] _ in
                 guard let self, isSuppressingTapForGlide == false else { return }
@@ -745,7 +761,39 @@ final class KeyboardViewController: UIInputViewController,
         }
     }
 
-    @objc private func deleteBackward() {
+    @objc private func startDeleteRepeat() {
+        stopDeleteRepeat()
+        performDeleteBackward()
+
+        deleteRepeatTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(380))
+            } catch {
+                return
+            }
+
+            var repeatCount = 0
+            while Task.isCancelled == false {
+                guard let self else { return }
+                performDeleteBackward()
+                repeatCount += 1
+
+                let interval = repeatCount < 12 ? 80 : 45
+                do {
+                    try await Task.sleep(for: .milliseconds(interval))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    @objc private func stopDeleteRepeat() {
+        deleteRepeatTask?.cancel()
+        deleteRepeatTask = nil
+    }
+
+    private func performDeleteBackward() {
         guard isSuppressingTapForGlide == false else { return }
         clearGlideCandidates()
         UIDevice.current.playInputClick()
@@ -818,7 +866,7 @@ final class KeyboardViewController: UIInputViewController,
         case .character, .space:
             Self.standardKeyBackground
         case .returnKey:
-            .systemBlue
+            Self.utilityKeyBackground
         default:
             Self.utilityKeyBackground
         }
@@ -1063,8 +1111,9 @@ final class KeyboardViewController: UIInputViewController,
         guard hasFullAccess else {
             updateVoiceButton(
                 color: .systemGray,
-                isEnabled: true,
-                accessibilityLabel: "Allow Full Access for Hex Voice"
+                isEnabled: false,
+                accessibilityLabel: "Allow Full Access for Hex Voice",
+                image: Self.unavailableVoiceImage
             )
             return
         }
@@ -1113,9 +1162,12 @@ final class KeyboardViewController: UIInputViewController,
             }
         case .consumed, .failed, nil:
             updateVoiceButton(
-                color: .systemBlue,
-                isEnabled: true,
-                accessibilityLabel: warmSessionReady ? "Start Hex Voice" : "Hex Voice"
+                color: warmSessionReady ? .systemBlue : .systemGray,
+                isEnabled: warmSessionReady,
+                accessibilityLabel: warmSessionReady
+                    ? "Start Hex Voice"
+                    : "Arm Hex to enable voice entry",
+                image: warmSessionReady ? nil : Self.unavailableVoiceImage
             )
         }
     }
