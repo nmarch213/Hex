@@ -19,6 +19,8 @@ struct HexKeyboardTracerApp: App {
 private struct DictationTracerView: View {
     @ObservedObject var controller: PrototypeDictationController
     @State private var seededTranscript = "Hello from the Hex keyboard tracer."
+    @State private var swipeToTypeEnabled = PrototypeKeyboardPreferences
+        .isSwipeToTypeEnabled()
 
     var body: some View {
         NavigationStack {
@@ -69,6 +71,16 @@ private struct DictationTracerView: View {
                         controller.saveCredential()
                     }
                     Text("The prototype pins Ronin as its only origin and stores the Device Credential in this device's Keychain. Rotate it after testing.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Keyboard") {
+                    Toggle(
+                        "Swipe to Type (Experimental)",
+                        isOn: swipeToTypeBinding
+                    )
+                    Text("Decodes one English word at a time entirely on this iPhone. Tap typing, the Globe key, and Hex voice entry remain available.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -167,6 +179,16 @@ private struct DictationTracerView: View {
         Binding(
             get: { controller.state.token },
             set: { token in controller.setToken(token) }
+        )
+    }
+
+    private var swipeToTypeBinding: Binding<Bool> {
+        Binding(
+            get: { swipeToTypeEnabled },
+            set: { isEnabled in
+                swipeToTypeEnabled = isEnabled
+                PrototypeKeyboardPreferences.setSwipeToTypeEnabled(isEnabled)
+            }
         )
     }
 

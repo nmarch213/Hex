@@ -2,7 +2,10 @@ import UIKit
 import os.log
 
 @MainActor
-final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
+final class KeyboardViewController: UIInputViewController,
+    UIInputViewAudioFeedback,
+    UIGestureRecognizerDelegate
+{
     private enum Page {
         case letters
         case numbers
@@ -23,6 +26,15 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         case space
         case returnKey
         case nextKeyboard
+    }
+
+    private struct GlideCommit {
+        var insertedText: String
+        let candidateWords: [String]
+        let isCapitalized: Bool
+        let leadingSpace: String
+        let documentIdentifier: UUID?
+        let path: [PrototypeGlidePoint]
     }
 
     private static let letterRows: [[Key]] = [
@@ -46,6 +58,52 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private var keyButtons: [(key: Key, button: UIButton)] = []
     private var statePollingTask: Task<Void, Never>?
     private var latestSnapshot: PrototypeIPCSnapshot?
+    private var swipeToTypeEnabled = false
+    private var glidePoints: [PrototypeGlidePoint] = []
+    private var isSuppressingTapForGlide = false
+    private var lastGlideCommit: GlideCommit?
+    private var glideTrailClearWorkItem: DispatchWorkItem?
+    private var keyboardHeightConstraint: NSLayoutConstraint?
+
+    private lazy var glideDecoder: PrototypeGlideDecoder? = {
+        guard let resourceURL = Bundle(for: Self.self).url(
+            forResource: "english-glide-frequency",
+            withExtension: "txt"
+        ),
+        let contents = try? String(contentsOf: resourceURL, encoding: .utf8) else {
+            HexLog.app.error("Glide lexicon resource is unavailable")
+            return nil
+        }
+
+        let entries = PrototypeGlideLexicon.entries(from: contents)
+        guard entries.isEmpty == false else {
+            HexLog.app.error("Glide lexicon contains no usable entries")
+            return nil
+        }
+        HexLog.app.notice("Loaded \(entries.count) local glide words")
+        return PrototypeGlideDecoder(entries: entries)
+    }()
+
+    private lazy var glidePanRecognizer: UIPanGestureRecognizer = {
+        let recognizer = UIPanGestureRecognizer(
+            target: self,
+            action: #selector(handleGlidePan(_:))
+        )
+        recognizer.cancelsTouchesInView = false
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.delegate = self
+        return recognizer
+    }()
+
+    private let glideTrailLayer: CAShapeLayer = {
+        let layer = CAShapeLayer()
+        layer.fillColor = UIColor.clear.cgColor
+        layer.strokeColor = UIColor.systemBlue.withAlphaComponent(0.72).cgColor
+        layer.lineWidth = 4
+        layer.lineCap = .round
+        layer.lineJoin = .round
+        return layer
+    }()
 
     var enableInputClicksWhenVisible: Bool { true }
 
@@ -95,18 +153,29 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         return stack
     }()
 
+    private let candidateRow: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.spacing = 6
+        stack.distribution = .fillEqually
+        return stack
+    }()
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
         hasDictationKey = true
+        swipeToTypeEnabled = PrototypeKeyboardPreferences.isSwipeToTypeEnabled()
         view.backgroundColor = .secondarySystemBackground
         configureLayout()
         rebuildRows()
+        configureGlideInput()
         renderState(note: "Ready")
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        refreshSwipeToTypeSetting()
         startStatePolling()
     }
 
@@ -119,7 +188,14 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         super.viewWillDisappear(animated)
         statePollingTask?.cancel()
         statePollingTask = nil
+        clearGlideCandidates()
         requestCancellationForClosingKeyboard()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        rowsStack.layer.addSublayer(glideTrailLayer)
+        glideTrailLayer.frame = rowsStack.bounds
     }
 
     override func viewWillLayoutSubviews() {
@@ -129,6 +205,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
+        validateGlideReplacement()
         updateReturnKeyTitle()
     }
 
@@ -145,7 +222,9 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         cancelButton.widthAnchor.constraint(equalToConstant: 42).isActive = true
         cancelButton.heightAnchor.constraint(equalToConstant: 42).isActive = true
 
-        let stack = UIStackView(arrangedSubviews: [actionRow, rowsStack])
+        let stack = UIStackView(
+            arrangedSubviews: [actionRow, candidateRow, rowsStack]
+        )
         stack.axis = .vertical
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -158,9 +237,325 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
         ])
 
-        let heightConstraint = view.heightAnchor.constraint(equalToConstant: 298)
+        let candidateHeightConstraint = candidateRow.heightAnchor.constraint(
+            equalToConstant: 34
+        )
+        candidateHeightConstraint.priority = .defaultHigh
+        candidateHeightConstraint.isActive = true
+
+        let heightConstraint = view.heightAnchor.constraint(
+            equalToConstant: swipeToTypeEnabled ? 340 : 298
+        )
         heightConstraint.priority = .defaultHigh
         heightConstraint.isActive = true
+        keyboardHeightConstraint = heightConstraint
+    }
+
+    private func configureGlideInput() {
+        rowsStack.addGestureRecognizer(glidePanRecognizer)
+        rowsStack.layer.addSublayer(glideTrailLayer)
+        updateSwipeToTypeConfiguration()
+    }
+
+    private func refreshSwipeToTypeSetting() {
+        let isEnabled = PrototypeKeyboardPreferences.isSwipeToTypeEnabled()
+        guard isEnabled != swipeToTypeEnabled else { return }
+        swipeToTypeEnabled = isEnabled
+        updateSwipeToTypeConfiguration()
+    }
+
+    private func updateSwipeToTypeConfiguration() {
+        candidateRow.isHidden = swipeToTypeEnabled == false
+        keyboardHeightConstraint?.constant = swipeToTypeEnabled ? 340 : 298
+        if swipeToTypeEnabled {
+            showGlideCandidates([])
+            _ = glideDecoder
+        } else {
+            clearGlideCandidates()
+        }
+        view.setNeedsLayout()
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === glidePanRecognizer,
+              swipeToTypeEnabled,
+              page == .letters,
+              glideDecoder != nil else {
+            return false
+        }
+        return character(at: gestureRecognizer.location(in: rowsStack)) != nil
+    }
+
+    @objc private func handleGlidePan(_ recognizer: UIPanGestureRecognizer) {
+        let location = recognizer.location(in: rowsStack)
+        switch recognizer.state {
+        case .began:
+            clearGlideCandidates()
+            glideTrailClearWorkItem?.cancel()
+            let translation = recognizer.translation(in: rowsStack)
+            let origin = PrototypeGlidePoint(
+                x: Double(location.x - translation.x),
+                y: Double(location.y - translation.y)
+            )
+            glidePoints = [origin]
+            appendGlidePoint(location)
+            isSuppressingTapForGlide = true
+            updateGlideTrail()
+        case .changed:
+            appendGlidePoint(location)
+            updateGlideTrail()
+        case .ended:
+            appendGlidePoint(location)
+            finishGlide()
+            scheduleGlideEnd()
+        case .cancelled, .failed:
+            glidePoints.removeAll(keepingCapacity: true)
+            scheduleGlideEnd()
+        default:
+            break
+        }
+    }
+
+    private func appendGlidePoint(_ point: CGPoint) {
+        let candidate = PrototypeGlidePoint(
+            x: Double(point.x),
+            y: Double(point.y)
+        )
+        guard glidePoints.last.map({ $0.distance(to: candidate) >= 2 }) != false else {
+            return
+        }
+        glidePoints.append(candidate)
+    }
+
+    private func finishGlide() {
+        guard let glideDecoder else {
+            glidePoints.removeAll(keepingCapacity: true)
+            return
+        }
+
+        let path = glidePoints
+        glidePoints.removeAll(keepingCapacity: true)
+        let keyCenters = currentLetterCenters
+        let startedAt = CACurrentMediaTime()
+        let candidates = glideDecoder.candidates(
+            for: path,
+            keyCenters: keyCenters,
+            limit: 3
+        )
+        let elapsedMilliseconds = Int(
+            (CACurrentMediaTime() - startedAt) * 1_000
+        )
+        HexLog.app.debug(
+            "Glide decoded \(candidates.count) candidates in \(elapsedMilliseconds) ms"
+        )
+
+        guard let first = candidates.first, first.score <= 6 else {
+            showGlideCandidates([])
+            return
+        }
+        commitGlideWord(first.word, candidates: candidates, path: path)
+    }
+
+    private func commitGlideWord(
+        _ word: String,
+        candidates: [PrototypeGlideCandidate],
+        path: [PrototypeGlidePoint]
+    ) {
+        let context = textDocumentProxy.documentContextBeforeInput ?? ""
+        let leadingSpace = context.last.map { character in
+            character.isLetter || character.isNumber ? " " : ""
+        } ?? ""
+        let isCapitalized = shiftState != .lowercase
+            || shouldCapitalizeGlideWord(after: context)
+        let displayedWord = styledGlideWord(word, isCapitalized: isCapitalized)
+        let insertedText = leadingSpace + displayedWord + " "
+
+        textDocumentProxy.insertText(insertedText)
+        UIDevice.current.playInputClick()
+        lastGlideCommit = GlideCommit(
+            insertedText: insertedText,
+            candidateWords: candidates.map(\.word),
+            isCapitalized: isCapitalized,
+            leadingSpace: leadingSpace,
+            documentIdentifier: currentDocumentIdentifier,
+            path: path
+        )
+        showGlideCandidates(candidates.map(\.word))
+
+        if shiftState == .uppercase {
+            shiftState = .lowercase
+            updateKeyTitles()
+        }
+        logGlideFixture(path: path, selectedWord: word)
+    }
+
+    private func replaceLastGlideWord(with candidateIndex: Int) {
+        guard var commit = lastGlideCommit,
+              commit.candidateWords.indices.contains(candidateIndex),
+              commit.documentIdentifier == currentDocumentIdentifier,
+              textDocumentProxy.documentContextBeforeInput?.hasSuffix(
+                  commit.insertedText
+              ) == true else {
+            clearGlideCandidates()
+            return
+        }
+
+        for _ in commit.insertedText {
+            textDocumentProxy.deleteBackward()
+        }
+        let replacement = styledGlideWord(
+            commit.candidateWords[candidateIndex],
+            isCapitalized: commit.isCapitalized
+        )
+        commit.insertedText = commit.leadingSpace + replacement + " "
+        textDocumentProxy.insertText(commit.insertedText)
+        UIDevice.current.playInputClick()
+        lastGlideCommit = commit
+        showGlideCandidates(commit.candidateWords)
+        logGlideFixture(
+            path: commit.path,
+            selectedWord: commit.candidateWords[candidateIndex]
+        )
+    }
+
+    private func showGlideCandidates(_ words: [String]) {
+        candidateRow.arrangedSubviews.forEach { view in
+            candidateRow.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        for index in 0..<3 {
+            var configuration = UIButton.Configuration.plain()
+            configuration.baseForegroundColor = .label
+            configuration.title = words.indices.contains(index)
+                ? styledGlideWord(
+                    words[index],
+                    isCapitalized: lastGlideCommit?.isCapitalized == true
+                )
+                : ""
+
+            let button = UIButton(configuration: configuration)
+            button.isEnabled = words.indices.contains(index)
+            button.accessibilityLabel = words.indices.contains(index)
+                ? "Replace with \(configuration.title ?? words[index])"
+                : nil
+            button.addAction(UIAction { [weak self] _ in
+                self?.replaceLastGlideWord(with: index)
+            }, for: .touchUpInside)
+            candidateRow.addArrangedSubview(button)
+        }
+    }
+
+    private func clearGlideCandidates() {
+        lastGlideCommit = nil
+        showGlideCandidates([])
+    }
+
+    private func validateGlideReplacement() {
+        guard let commit = lastGlideCommit else { return }
+        guard commit.documentIdentifier == currentDocumentIdentifier,
+              textDocumentProxy.documentContextBeforeInput?.hasSuffix(
+                  commit.insertedText
+              ) == true else {
+            clearGlideCandidates()
+            return
+        }
+    }
+
+    private func styledGlideWord(
+        _ word: String,
+        isCapitalized: Bool
+    ) -> String {
+        guard isCapitalized, let first = word.first else {
+            return word.lowercased()
+        }
+        return first.uppercased() + word.dropFirst().lowercased()
+    }
+
+    private func shouldCapitalizeGlideWord(after context: String) -> Bool {
+        let trimmed = context.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let last = trimmed.last else { return true }
+        return ".!?".contains(last)
+    }
+
+    private func character(at point: CGPoint) -> Character? {
+        for (key, button) in keyButtons {
+            guard case let .character(character) = key,
+                  let letter = character.first else {
+                continue
+            }
+            let frame = button.convert(button.bounds, to: rowsStack)
+                .insetBy(dx: -8, dy: -8)
+            if frame.contains(point) {
+                return letter
+            }
+        }
+        return nil
+    }
+
+    private var currentLetterCenters: [Character: PrototypeGlidePoint] {
+        Dictionary(uniqueKeysWithValues: keyButtons.compactMap { key, button in
+            guard case let .character(character) = key,
+                  let letter = character.first else {
+                return nil
+            }
+            let center = button.convert(
+                CGPoint(x: button.bounds.midX, y: button.bounds.midY),
+                to: rowsStack
+            )
+            return (
+                letter,
+                PrototypeGlidePoint(x: Double(center.x), y: Double(center.y))
+            )
+        })
+    }
+
+    private func updateGlideTrail() {
+        guard let first = glidePoints.first else {
+            glideTrailLayer.path = nil
+            return
+        }
+        let path = UIBezierPath()
+        path.move(to: CGPoint(x: first.x, y: first.y))
+        for point in glidePoints.dropFirst() {
+            path.addLine(to: CGPoint(x: point.x, y: point.y))
+        }
+        glideTrailLayer.path = path.cgPath
+    }
+
+    private func scheduleGlideEnd() {
+        let clearWorkItem = DispatchWorkItem { [weak self] in
+            self?.glideTrailLayer.path = nil
+        }
+        glideTrailClearWorkItem?.cancel()
+        glideTrailClearWorkItem = clearWorkItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + 0.16,
+            execute: clearWorkItem
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
+            self?.isSuppressingTapForGlide = false
+        }
+    }
+
+    private func logGlideFixture(
+        path: [PrototypeGlidePoint],
+        selectedWord: String
+    ) {
+        #if DEBUG
+        let width = max(Double(rowsStack.bounds.width), 1)
+        let height = max(Double(rowsStack.bounds.height), 1)
+        let normalizedPath = path.map { point in
+            String(
+                format: "[%.4f,%.4f]",
+                point.x / width,
+                point.y / height
+            )
+        }.joined(separator: ",")
+        HexLog.app.debug(
+            "Glide prototype selected \(selectedWord, privacy: .private) for path [\(normalizedPath, privacy: .private)]"
+        )
+        #endif
     }
 
     private func rebuildRows() {
@@ -217,7 +612,9 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             button.addTarget(self, action: #selector(deleteBackward), for: .touchDown)
         default:
             button.addAction(UIAction { [weak self] _ in
-                self?.handle(key)
+                guard let self, isSuppressingTapForGlide == false else { return }
+                clearGlideCandidates()
+                handle(key)
             }, for: .touchUpInside)
         }
 
@@ -269,6 +666,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     @objc private func deleteBackward() {
+        guard isSuppressingTapForGlide == false else { return }
+        clearGlideCandidates()
         UIDevice.current.playInputClick()
         textDocumentProxy.deleteBackward()
     }
@@ -372,6 +771,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     @objc private func handleDictationButton() {
+        clearGlideCandidates()
         guard hasFullAccess else {
             renderState(note: "Allow Full Access in Settings")
             return
@@ -537,6 +937,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
                 return
             }
 
+            clearGlideCandidates()
             textDocumentProxy.insertText(consumed.transcript)
             try PrototypeMailbox.markInserted(id: consumed.id)
             refreshState(note: "Transcript inserted")

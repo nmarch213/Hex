@@ -93,6 +93,8 @@ targets:
     platform: iOS
     sources:
       - App/Tests
+      - path: Keyboard/Resources/english-glide-frequency.txt
+        buildPhase: resources
     dependencies:
       - target: HexKeyboardTracer
     settings:
